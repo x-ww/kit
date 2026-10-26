@@ -1,6 +1,6 @@
-# media-toolbox
+# kit
 
-个人媒体工具箱。
+个人工具箱。
 
 ## IPTV 直播源
 
@@ -8,8 +8,8 @@
 
 ### 订阅地址
 
-- jsDelivr CDN（推荐）：https://cdn.jsdelivr.net/gh/x-ww/media-toolbox@main/iptv/live.m3u
-- GitHub Raw：https://raw.githubusercontent.com/x-ww/media-toolbox/main/iptv/live.m3u
+- jsDelivr CDN（推荐）：https://cdn.jsdelivr.net/gh/x-ww/kit@main/iptv/live.m3u
+- GitHub Raw：https://raw.githubusercontent.com/x-ww/kit/main/iptv/live.m3u
 
 ### 节目单（EPG / XMLTV）
 
