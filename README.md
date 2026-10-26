@@ -26,4 +26,4 @@ https://epg.pw/xmltv/epg_CN.xml
 
 ## 其他
 
-- `MovieRatingIntegrator/` — 影片评分整合脚本
+- `kit/` — 影评聚合油猴脚本（豆瓣/IMDb 评分聚合）
