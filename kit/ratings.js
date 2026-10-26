@@ -21,7 +21,7 @@
 // @homepageURL  https://github.com/x-ww/kit/tree/main/kit
 // @supportURL   https://github.com/x-ww/kit/issues
 // @updateURL    https://github.com/x-ww/kit/raw/main/kit/ratings.js
-// @downloadURL  https://github.com/x-ww/kit/raw/main/MovieRatingIntegrator/MovieRatingIntegrator.js
+// @downloadURL  https://github.com/x-ww/kit/raw/main/kit/ratings.js
 // @noframes
 // @run-at       document-end
 // ==/UserScript==
