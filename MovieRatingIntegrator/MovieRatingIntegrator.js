@@ -18,10 +18,10 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @homepageURL  https://github.com/x-ww/MovieRatingIntegrator
-// @supportURL   https://github.com/x-ww/MovieRatingIntegrator/issues
-// @updateURL    https://github.com/x-ww/Scripts/raw/main/MovieRatingIntegrator/MovieRatingIntegrator.js
-// @downloadURL  https://github.com/x-ww/Scripts/raw/main/MovieRatingIntegrator/MovieRatingIntegrator.js
+// @homepageURL  https://github.com/x-ww/kit/tree/main/MovieRatingIntegrator
+// @supportURL   https://github.com/x-ww/kit/issues
+// @updateURL    https://github.com/x-ww/kit/raw/main/MovieRatingIntegrator/MovieRatingIntegrator.js
+// @downloadURL  https://github.com/x-ww/kit/raw/main/MovieRatingIntegrator/MovieRatingIntegrator.js
 // @noframes
 // @run-at       document-end
 // ==/UserScript==
