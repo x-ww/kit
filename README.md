@@ -4,12 +4,12 @@
 
 ## IPTV 直播源
 
-`iptv/live.m3u` — Jellyfin 直播频道列表，基于 [iptv-org](https://github.com/iptv-org/iptv) 公开源**逐条实测**筛选生成（2026-10-26：中文频道 66 + 国际新闻 24 = 90 个，仅保留实测可播的频道）。
+`live.m3u` — Jellyfin 直播频道列表，基于 [iptv-org](https://github.com/iptv-org/iptv) 公开源**逐条实测**筛选生成（2026-10-26：中文频道 66 + 国际新闻 24 = 90 个，仅保留实测可播的频道）。
 
 ### 订阅地址
 
-- jsDelivr CDN（推荐）：https://cdn.jsdelivr.net/gh/x-ww/kit@main/iptv/live.m3u
-- GitHub Raw：https://raw.githubusercontent.com/x-ww/kit/main/iptv/live.m3u
+- jsDelivr CDN（推荐）：https://cdn.jsdelivr.net/gh/x-ww/kit@main/live.m3u
+- GitHub Raw：https://raw.githubusercontent.com/x-ww/kit/main/live.m3u
 
 ### 节目单（EPG / XMLTV）
 
@@ -22,7 +22,7 @@ https://epg.pw/xmltv/epg_CN.xml
 
 ### 维护
 
-`iptv/tools/` 内为筛选脚本：拉取候选列表 → 并发实测每条流的可用性 → 生成精选 m3u。频道失效后重跑即可重新筛选。
+`tools/` 内为筛选脚本：拉取候选列表 → 并发实测每条流的可用性 → 生成精选 m3u。频道失效后重跑即可重新筛选。
 
 ## 其他
 
