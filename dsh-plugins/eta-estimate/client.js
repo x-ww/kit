@@ -8,117 +8,242 @@ window.__ModuleLoader__.load({
     try { ReactDOM = require('react-dom'); } catch (error) { /* no portal: render bubble inline */ }
 
     const NS = 'eta-estimate';
+    const MODE_KEY = 'eta-estimate.mode.v2';
 
     /**
-     * Empirical prior measured from 239 completed turns in this user's own
-     * session logs: for each number of steps ALREADY completed, the P25/P50/P75
-     * of how many steps remained. Backtested on the same data, this step-indexed
-     * survival table beat every duration-only model (median error 79% vs 121%
-     * for a median-minus-elapsed model, with a much narrower band).
+     * v2 model, fitted on this machine's own session logs.
+     *
+     * Ground truth: 98 sessions / 251 completed turns / 1757 probe points, sampled
+     * at 10..90% of each turn's WALL-CLOCK duration (not at step boundaries), so the
+     * features match what a live pill can observe at an arbitrary instant.
+     * "steps" = closed step/end events (the log's definition of a step).
+     *
+     *   log(remaining_seconds) =
+     *       coef[0] + coef[1]*log(elapsed_seconds + 1) + coef[2]*log(steps_done + 1)
+     *
+     * Bands come from residual quantiles (q10/q90 => about 80% coverage). Fitted
+     * with 5-fold cross-validation GROUPED BY SESSION (no turn from a test session
+     * is used in training). See README.md for the full comparison table.
+     *
+     * Held-out backtest, same probe protocol:
+     *   v1.2 (fixed 6.4s/step + step table) : 194% median relative error,
+     *        2.94x median bias, 40% interval coverage, 103s median absolute error
+     *   v2   (below)                       :  81% median relative error,
+     *        0.99x median bias, 77% interval coverage,  32s median absolute error
+     *
+     * Remaining time is still intrinsically heavy-tailed (turn durations span
+     * 0.3s .. 73min). No point predictor can be a reliable countdown, which is
+     * why the DEFAULT pill shows deterministic facts instead (see display modes).
      */
-    const STEP_PRIOR = {0:[8.0,19.0,35.0],1:[7.0,18.0,34.0],2:[6.0,17.0,33.0],3:[5.5,17.0,33.0],4:[5.25,19.5,34.5],5:[5.0,19.0,34.5],6:[6.75,19.5,35.5],7:[7.5,19.0,36.0],8:[10.0,19.5,38.5],9:[10.0,20.0,39.0],10:[11.0,20.0,38.75],11:[10.75,19.0,38.25],12:[10.5,18.0,37.5],13:[10.25,17.0,36.75],14:[10.0,17.0,36.5],15:[9.0,16.0,36.0],16:[8.0,15.5,35.75],17:[7.5,15.0,35.5],18:[8.0,16.0,37.0],19:[8.0,17.0,36.0],20:[8.0,16.0,35.0],21:[7.0,16.0,34.5],22:[6.25,16.0,33.75],23:[6.0,16.0,33.0],24:[6.0,17.0,34.25],25:[5.0,17.0,33.75],26:[5.25,18.5,33.0],27:[6.25,20.0,37.25],28:[7.0,20.0,38.5],29:[7.0,19.5,38.75],30:[9.0,20.5,40.5],31:[10.0,21.5,40.5],32:[9.0,22.0,40.0],33:[10.0,22.0,42.5],34:[9.75,21.0,43.25],35:[11.0,20.0,46.5],36:[12.0,19.5,50.5],37:[11.0,19.0,52.0],38:[10.0,18.0,51.0],39:[9.5,19.0,50.5],40:[8.5,18.0,49.5],41:[9.0,18.0,49.0],42:[8.0,17.0,48.0],43:[9.5,16.0,48.0],44:[8.5,15.0,47.0],45:[7.5,14.0,46.0],46:[9.0,20.0,46.0],47:[8.0,19.0,45.0],48:[7.25,20.5,44.0],49:[7.0,21.0,43.0],50:[7.5,21.0,45.75],51:[7.5,21.0,48.5],52:[6.5,20.0,47.5],53:[5.5,19.0,46.5],54:[5.0,21.5,49.25],55:[11.5,34.0,62.0],56:[11.75,33.5,66.0],57:[10.75,32.5,65.0],58:[12.0,32.0,69.0],59:[16.5,33.0,74.0],60:[15.5,32.0,73.0]};
-    const MAX_TABLE_STEP = 60;
-    /** Median observed step duration (6.4s) across 4,913 measured steps. */
-    const STEP_PACE_MS = 6400;
-    /** Outward widening that lifts band coverage to roughly two thirds. */
-    const WIDEN = 1.3;
+    const MODEL = {
+      coef: [0.281552, 1.000945, -0.269862],
+      q10: -1.727042,
+      q50: -0.022416,
+      q90: 1.780031,
+      sampleTurns: 251,
+      sampleProbes: 1757,
+      /* Empirical total-duration distribution, seconds, at percentilePoints. */
+      percentilePoints: [0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 1],
+      durationPercentiles: [0.3, 1.1, 5.3, 21.1, 37.2, 60.6, 90.8, 178.8, 306.3, 422.2, 733.2, 1229.6, 4399.4],
+    };
+
+    function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+    /** Calibrated 80% band for remaining seconds, from elapsed seconds + closed steps. */
+    function estimateRemaining(elapsedSec, stepsDone) {
+      const el = Math.max(0, elapsedSec);
+      const k = Math.max(0, Math.floor(stepsDone) || 0);
+      const f = MODEL.coef[0]
+        + MODEL.coef[1] * Math.log(el + 1)
+        + MODEL.coef[2] * Math.log(k + 1);
+      return {
+        low: clamp(Math.exp(f + MODEL.q10), 0.5, 10800),
+        mid: clamp(Math.exp(f + MODEL.q50), 0.5, 10800),
+        high: clamp(Math.exp(f + MODEL.q90), 1, 10800),
+      };
+    }
+
+    /** What fraction of past finished tasks were shorter than this elapsed time. */
+    function elapsedPercentile(elapsedSec) {
+      const pts = MODEL.percentilePoints;
+      const vals = MODEL.durationPercentiles;
+      if (elapsedSec <= vals[0]) return 0;
+      for (let i = 1; i < vals.length; i += 1) {
+        if (elapsedSec <= vals[i]) {
+          const frac = (elapsedSec - vals[i - 1]) / Math.max(0.001, vals[i] - vals[i - 1]);
+          return clamp(Math.round((pts[i - 1] + frac * (pts[i] - pts[i - 1])) * 100), 0, 99);
+        }
+      }
+      return 99;
+    }
+
+    /** Coarse units: a second-accurate number here would be false precision. */
+    function formatCoarse(sec, t) {
+      if (sec < 30) return t('eta.under1m');
+      if (sec < 60) return t('eta.sec', { n: String(Math.max(5, Math.round(sec / 5) * 5)) });
+      const mins = sec / 60;
+      if (mins < 2) return t('eta.min', { n: '1–2' });
+      if (mins < 10) return t('eta.min', { n: String(Math.round(mins)) });
+      return t('eta.min', { n: String(Math.round(mins / 5) * 5) });
+    }
+
+    function formatElapsed(sec, t) {
+      if (sec < 60) return t('eta.sec', { n: String(Math.max(1, Math.round(sec))) });
+      return t('eta.min', { n: String(Math.round(sec / 60)) });
+    }
 
     const DICTS = {
       en: {
         'eta.range': '≈ {low}–{high} left',
+        'eta.about': '≈ {v} left',
         'eta.soon': 'Almost done',
-        'eta.late': 'May take a while longer',
-        'eta.unknown': 'Remaining time hard to estimate',
+        'eta.plan': 'Task {done}/{total} · {elapsed} elapsed',
+        'eta.facts': '{elapsed} elapsed · step {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n}m',
         'eta.under1m': 'under a minute',
-        'eta.tip.basis': 'Typical for step {step} of a task, from {turns} past tasks',
-        'eta.tip.wide': 'step count beyond past tasks; rougher',
-        'eta.tip.reference': 'rough guide only — can be off by several times',
+        'eta.mode.progress': 'facts only',
+        'eta.mode.estimate': 'time estimate',
+        'eta.tip.basis': 'Based on {turns} past tasks, {probes} sample points',
+        'eta.tip.coverage': 'About 80% of past tasks fall inside this range',
+        'eta.tip.facts': 'Elapsed time and step count are exact, not estimates',
+        'eta.tip.plan': 'Task progress is exact, not a prediction',
+        'eta.tip.pct': 'Already longer than {pct}% of past tasks',
+        'eta.tip.reference': 'Remaining time cannot be predicted precisely — rough guide only',
+        'eta.tip.toggle': 'Click to switch to {next}',
       },
       zh: {
         'eta.range': '预计剩余 ≈ {low}–{high}',
+        'eta.about': '预计剩余 ≈ {v}',
         'eta.soon': '预计即将完成',
-        'eta.late': '可能还要一会儿',
-        'eta.unknown': '剩余时间难以预估',
+        'eta.plan': '任务 {done}/{total} · 已用时 {elapsed}',
+        'eta.facts': '已用时 {elapsed} · 第 {step} 步',
         'eta.sec': '{n} 秒',
         'eta.min': '{n} 分钟',
         'eta.under1m': '不到 1 分钟',
-        'eta.tip.basis': '同类任务第 {step} 步时的常见耗时，样本 {turns} 个历史任务',
-        'eta.tip.wide': '步数已超出历史样本范围，估算更粗略',
-        'eta.tip.reference': '仅供参考，实际可能相差数倍',
+        'eta.mode.progress': '仅看进度',
+        'eta.mode.estimate': '时间预估',
+        'eta.tip.basis': '基于 {turns} 个历史任务、{probes} 个采样时点回测',
+        'eta.tip.coverage': '约 80% 的历史任务剩余时间落在此区间',
+        'eta.tip.facts': '已用时与步数是精确值，不含预测',
+        'eta.tip.plan': '任务进度是确定值，不含预测',
+        'eta.tip.pct': '本次已用时超过 {pct}% 的历史任务',
+        'eta.tip.reference': '剩余时间无法精确预测，仅供参考',
+        'eta.tip.toggle': '点击切换为「{next}」',
       },
       ja: {
         'eta.range': '残り ≈ {low}–{high}',
+        'eta.about': '残り ≈ {v}',
         'eta.soon': 'まもなく完了',
-        'eta.late': 'もう少し時間がかかりそうです',
-        'eta.unknown': '残り時間は推定困難',
+        'eta.plan': 'タスク {done}/{total} · 経過 {elapsed}',
+        'eta.facts': '経過 {elapsed} · ステップ {step}',
         'eta.sec': '{n}秒',
         'eta.min': '{n}分',
         'eta.under1m': '1分未満',
-        'eta.tip.basis': '過去 {turns} タスクの第 {step} ステップ時点の一般的な所要時間',
-        'eta.tip.wide': 'ステップ数が過去の範囲を超えているため、より粗い推定です',
-        'eta.tip.reference': 'あくまで目安です。数倍ずれることがあります',
+        'eta.mode.progress': '進捗のみ',
+        'eta.mode.estimate': '残り時間',
+        'eta.tip.basis': '過去 {turns} タスク、{probes} 時点で検証',
+        'eta.tip.coverage': '約 80% の過去タスクがこの範囲に収まります',
+        'eta.tip.facts': '経過時間とステップ数は実測値です',
+        'eta.tip.plan': 'タスク進捗は実測値です',
+        'eta.tip.pct': '過去タスクの {pct}% より長く経過',
+        'eta.tip.reference': '残り時間は正確に予測できません。目安のみ',
+        'eta.tip.toggle': 'クリックで「{next}」に切替',
       },
       es: {
         'eta.range': '≈ {low}–{high} restantes',
+        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Casi listo',
-        'eta.late': 'Puede tardar algo más',
-        'eta.unknown': 'Difícil estimar el tiempo restante',
+        'eta.plan': 'Tarea {done}/{total} · {elapsed} transcurridos',
+        'eta.facts': '{elapsed} transcurridos · paso {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
         'eta.under1m': 'menos de un minuto',
-        'eta.tip.basis': 'Habitual en el paso {step} de una tarea, según {turns} tareas anteriores',
-        'eta.tip.wide': 'más pasos que en las tareas anteriores; estimación más gruesa',
-        'eta.tip.reference': 'solo orientativo: puede fallar por varios múltiplos',
+        'eta.mode.progress': 'solo progreso',
+        'eta.mode.estimate': 'estimación de tiempo',
+        'eta.tip.basis': 'Basado en {turns} tareas previas y {probes} puntos',
+        'eta.tip.coverage': 'Cerca del 80% de las tareas previas cae en este rango',
+        'eta.tip.facts': 'El tiempo transcurrido y los pasos son valores exactos',
+        'eta.tip.plan': 'El progreso de la tarea es un valor exacto',
+        'eta.tip.pct': 'Ya supera al {pct}% de las tareas previas',
+        'eta.tip.reference': 'El tiempo restante no se puede predecir con precisión',
+        'eta.tip.toggle': 'Haz clic para cambiar a «{next}»',
       },
       fr: {
         'eta.range': '≈ {low}–{high} restantes',
+        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Presque terminé',
-        'eta.late': 'Cela peut prendre encore un moment',
-        'eta.unknown': 'Temps restant difficile à estimer',
+        'eta.plan': 'Tâche {done}/{total} · {elapsed} écoulées',
+        'eta.facts': '{elapsed} écoulées · étape {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
         'eta.under1m': 'moins d’une minute',
-        'eta.tip.basis': 'Habituel à l’étape {step} d’une tâche, d’après {turns} tâches passées',
-        'eta.tip.wide': 'plus d’étapes que dans les tâches passées ; estimation plus grossière',
-        'eta.tip.reference': 'simple repère : l’écart peut être de plusieurs fois',
+        'eta.mode.progress': 'progression seule',
+        'eta.mode.estimate': 'estimation du temps',
+        'eta.tip.basis': 'Basé sur {turns} tâches passées et {probes} points',
+        'eta.tip.coverage': 'Environ 80% des tâches passées tombent dans cette plage',
+        'eta.tip.facts': 'Le temps écoulé et les étapes sont des valeurs exactes',
+        'eta.tip.plan': 'La progression de la tâche est une valeur exacte',
+        'eta.tip.pct': 'Déjà plus long que {pct}% des tâches passées',
+        'eta.tip.reference': 'Le temps restant ne peut pas être prédit précisément',
+        'eta.tip.toggle': 'Cliquez pour passer à « {next} »',
       },
       de: {
         'eta.range': '≈ {low}–{high} verbleibend',
+        'eta.about': '≈ {v} verbleibend',
         'eta.soon': 'Fast fertig',
-        'eta.late': 'Kann noch etwas dauern',
-        'eta.unknown': 'Restzeit schwer schätzbar',
+        'eta.plan': 'Aufgabe {done}/{total} · {elapsed} vergangen',
+        'eta.facts': '{elapsed} vergangen · Schritt {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} Min.',
         'eta.under1m': 'unter einer Minute',
-        'eta.tip.basis': 'Üblich bei Schritt {step} einer Aufgabe, aus {turns} früheren Aufgaben',
-        'eta.tip.wide': 'mehr Schritte als in früheren Aufgaben; gröbere Schätzung',
-        'eta.tip.reference': 'nur ein Anhaltspunkt – Abweichung um ein Mehrfaches möglich',
+        'eta.mode.progress': 'nur Fortschritt',
+        'eta.mode.estimate': 'Zeitschätzung',
+        'eta.tip.basis': 'Basierend auf {turns} früheren Aufgaben, {probes} Messpunkten',
+        'eta.tip.coverage': 'Rund 80% der früheren Aufgaben liegen in diesem Bereich',
+        'eta.tip.facts': 'Vergangene Zeit und Schritte sind exakte Werte',
+        'eta.tip.plan': 'Der Aufgabenfortschritt ist ein exakter Wert',
+        'eta.tip.pct': 'Bereits länger als {pct}% der früheren Aufgaben',
+        'eta.tip.reference': 'Die Restzeit lässt sich nicht genau vorhersagen',
+        'eta.tip.toggle': 'Klicken, um zu „{next}“ zu wechseln',
       },
       ru: {
         'eta.range': '≈ {low}–{high} осталось',
+        'eta.about': '≈ {v} осталось',
         'eta.soon': 'Почти готово',
-        'eta.late': 'Может занять ещё время',
-        'eta.unknown': 'Оставшееся время трудно оценить',
+        'eta.plan': 'Задача {done}/{total} · прошло {elapsed}',
+        'eta.facts': 'Прошло {elapsed} · шаг {step}',
         'eta.sec': '{n}с',
         'eta.min': '{n} мин',
         'eta.under1m': 'меньше минуты',
-        'eta.tip.basis': 'Обычно на шаге {step} задачи, по {turns} прошлым задачам',
-        'eta.tip.wide': 'шагов больше, чем в прошлых задачах; оценка грубее',
-        'eta.tip.reference': 'лишь ориентир: расхождение может быть кратно',
+        'eta.mode.progress': 'только прогресс',
+        'eta.mode.estimate': 'оценка времени',
+        'eta.tip.basis': 'По {turns} прошлым задачам и {probes} точкам',
+        'eta.tip.coverage': 'Около 80% прошлых задач попадают в этот диапазон',
+        'eta.tip.facts': 'Прошедшее время и число шагов — точные значения',
+        'eta.tip.plan': 'Прогресс задачи — точное значение',
+        'eta.tip.pct': 'Уже дольше {pct}% прошлых задач',
+        'eta.tip.reference': 'Оставшееся время нельзя предсказать точно',
+        'eta.tip.toggle': 'Нажмите, чтобы переключить на «{next}»',
       },
       pt: {
         'eta.range': '≈ {low}–{high} restantes',
+        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Quase concluído',
-        'eta.late': 'Pode demorar mais um pouco',
-        'eta.unknown': 'Difícil estimar o tempo restante',
+        'eta.plan': 'Tarefa {done}/{total} · {elapsed} decorridos',
+        'eta.facts': '{elapsed} decorridos · passo {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
         'eta.under1m': 'menos de um minuto',
-        'eta.tip.basis': 'Habitual no passo {step} de uma tarefa, com base em {turns} tarefas anteriores',
-        'eta.tip.wide': 'mais passos que nas tarefas anteriores; estimativa mais grosseira',
-        'eta.tip.reference': 'apenas referência: pode variar várias vezes',
+        'eta.mode.progress': 'apenas progresso',
+        'eta.mode.estimate': 'estimativa de tempo',
+        'eta.tip.basis': 'Com base em {turns} tarefas anteriores e {probes} pontos',
+        'eta.tip.coverage': 'Cerca de 80% das tarefas anteriores caem neste intervalo',
+        'eta.tip.facts': 'Tempo decorrido e passos são valores exatos',
+        'eta.tip.plan': 'O progresso da tarefa é um valor exato',
+        'eta.tip.pct': 'Já mais longo que {pct}% das tarefas anteriores',
+        'eta.tip.reference': 'O tempo restante não pode ser previsto com precisão',
+        'eta.tip.toggle': 'Clique para mudar para «{next}»',
       },
     };
 
@@ -147,27 +272,20 @@ window.__ModuleLoader__.load({
      * whole slot entry.
      */
     const CSS = [
-      /* StatsPills: anchor / pill / label / separator */
       '.dshEta_anchor{min-width:0;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));display:inline-flex}',
       '.dshEta_pill{box-sizing:border-box;border-radius:var(--dsw-radius-sm);max-width:100%;color:var(--dsw-alias-label-tertiary);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;background:0 0;border:none;align-items:center;gap:6px;padding:1px 8px;display:inline-flex}',
       '.dshEta_pill svg{flex:none;width:14px;height:14px}',
-      'button.dshEta_pill{cursor:pointer}',
-      'button.dshEta_pill[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
-      '@media (hover:hover){button.dshEta_pill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}}',
+      'button.dshEta_pill,.dshEta_pill[role=button]{cursor:pointer}',
+      '.dshEta_pill[role=button]:focus-visible{outline:1px solid var(--dsw-alias-interactive-bg-hover);outline-offset:1px}',
+      '@media (hover:hover){.dshEta_pill[role=button]:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}}',
       '.dshEta_label{text-overflow:ellipsis;min-width:0;overflow:hidden}',
-      /* Tooltip bubble / label */
       '.dshEta_tipBubble{display:inline-flex;align-items:safe center;gap:8px;position:fixed;z-index:1100;width:max-content;box-sizing:border-box;max-width:min(50vw,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:3px 7px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-static-neutral-bluish-00);font-size:13px;line-height:20px;white-space:pre-line;overflow-wrap:break-word;pointer-events:none;animation:dshEta_tipIn .15s var(--ds-ease-in-out,ease-in-out);transform:translate(-50%,-100%)}',
-      '.dshEta_tipBubble[data-pinned]{pointer-events:auto}',
       '.dshEta_tipLabel{min-width:0}',
       '@keyframes dshEta_tipIn{0%{opacity:0}}',
       '@media(prefers-reduced-motion:reduce){.dshEta_tipBubble{animation:none}}',
     ].join('');
 
-    /**
-     * The shipped `clock-outline` regular icon (16x16, 1px stroke, currentColor).
-     * Inlined rather than taken from the primitives sprite, which the plugin may
-     * not load. `data-icon` matches the host's icon naming convention.
-     */
+    /** The shipped clock-outline regular icon (16x16, 1px stroke, currentColor). */
     function ClockIcon() {
       return h('svg', {
         viewBox: '0 0 16 16', width: 16, height: 16,
@@ -185,13 +303,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /**
-     * A small copy of the host Tooltip's behavior: 200ms hover delay, focus,
-     * click-to-pin, Escape/Tab dismissal, side=top with an 8px gap, portal to
-     * document.body, role="tooltip". `onlyWhenClipped` is intentionally not
-     * applied: the host uses the bubble for a truncated reading, while this one
-     * carries the estimate's basis and is useful whenever the pointer rests.
-     */
+    /** A small copy of the host Tooltip: hover/focus, side=top, portal to body. */
     function createTooltip() {
       return function Tooltip(props) {
         const label = props.label;
@@ -199,9 +311,6 @@ window.__ModuleLoader__.load({
         const state = React.useState(false);
         const open = state[0];
         const setOpen = state[1];
-        const pinnedState = React.useState(false);
-        const pinned = pinnedState[0];
-        const setPinned = pinnedState[1];
         const rectState = React.useState(null);
         const rect = rectState[0];
         const setRect = rectState[1];
@@ -224,27 +333,15 @@ window.__ModuleLoader__.load({
         };
         const dismiss = function () {
           clear();
-          setPinned(false);
-          setOpen(false);
-          setRect(null);
-        };
-        const hide = function () {
-          clear();
-          if (pinned) return;
           setOpen(false);
           setRect(null);
         };
 
-        React.useEffect(function () {
-          return function () { clear(); };
-        }, []);
+        React.useEffect(function () { return function () { clear(); }; }, []);
         React.useEffect(function () {
           if (!open) return undefined;
           const onKey = function (event) {
-            if (event.key === 'Escape' || event.key === 'Tab') {
-              if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
-              dismiss();
-            }
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); }
           };
           document.addEventListener('keydown', onKey, true);
           return function () { document.removeEventListener('keydown', onKey, true); };
@@ -256,7 +353,6 @@ window.__ModuleLoader__.load({
             className: 'dshEta_tipBubble',
             'data-side': 'top',
             'data-portal': 'true',
-            'data-pinned': pinned ? 'true' : undefined,
             'data-align': 'center',
             role: 'tooltip',
             style: {
@@ -276,17 +372,11 @@ window.__ModuleLoader__.load({
           },
           onPointerLeave: function (event) {
             if (children.props.onPointerLeave) children.props.onPointerLeave(event);
-            hide();
-          },
-          onPointerDown: function (event) {
-            if (children.props.onPointerDown) children.props.onPointerDown(event);
-            if (event.pointerType === 'touch' && !pinned) dismiss();
+            clear(); setOpen(false); setRect(null);
           },
           onClick: function (event) {
             if (children.props.onClick) children.props.onClick(event);
-            clear();
-            setPinned(true);
-            show();
+            clear(); show();
           },
           onFocus: function (event) {
             if (children.props.onFocus) children.props.onFocus(event);
@@ -294,7 +384,7 @@ window.__ModuleLoader__.load({
           },
           onBlur: function (event) {
             if (children.props.onBlur) children.props.onBlur(event);
-            hide();
+            clear(); setOpen(false); setRect(null);
           },
         });
 
@@ -305,36 +395,69 @@ window.__ModuleLoader__.load({
       };
     }
 
-    function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
-
-    /** Rounded to coarse units: a second-accurate number here would be false precision. */
-    function formatCoarse(ms, t) {
-      const secs = ms / 1000;
-      if (secs < 30) return t('eta.under1m');
-      if (secs < 60) return t('eta.sec', { n: String(Math.max(5, Math.round(secs / 5) * 5)) });
-      const mins = secs / 60;
-      if (mins < 2) return t('eta.min', { n: '1–2' });
-      if (mins < 10) return t('eta.min', { n: String(Math.round(mins)) });
-      return t('eta.min', { n: String(Math.round(mins / 5) * 5) });
+    /** Count closed steps of a turn from the live timeline (step/end equivalent). */
+    function closedSteps(timeline, turn) {
+      if (!timeline || !timeline.turns || typeof timeline.turns.get !== 'function') return null;
+      let record = null;
+      try { record = timeline.turns.get(turn); } catch (error) { return null; }
+      const steps = record && record.steps;
+      if (!steps) return null;
+      let n = 0;
+      const visit = function (s) {
+        if (!s) return;
+        if (s.status === 'closed' || (s.end && typeof s.end.time === 'number')) n += 1;
+      };
+      try {
+        if (Array.isArray(steps)) { for (let i = 0; i < steps.length; i += 1) visit(steps[i]); }
+        else if (typeof steps.forEach === 'function') { steps.forEach(function (s) { visit(s); }); }
+        else return null;
+      } catch (error) { return null; }
+      return n;
     }
 
-    /** Steps remaining quantiles for a given completed-step count. */
-    function remainingSteps(k) {
-      const key = clamp(k, 0, MAX_TABLE_STEP);
-      const row = STEP_PRIOR[key];
-      if (key < MAX_TABLE_STEP || k <= MAX_TABLE_STEP) {
-        return { row: row, beyond: false };
+    /** Deterministic plan progress, when the agent published a todo list. */
+    function planInfo(todos) {
+      if (!todos) return null;
+      if (!Array.isArray(todos)) {
+        if (Array.isArray(todos.todos)) todos = todos.todos;
+        else if (Array.isArray(todos.items)) todos = todos.items;
+        else return null;
       }
-      const d = k - MAX_TABLE_STEP;
-      return { row: [d * 0.5, d * 0.8, d * 1.8], beyond: true };
+      let total = 0;
+      let done = 0;
+      let active = 0;
+      for (let i = 0; i < todos.length; i += 1) {
+        const item = todos[i];
+        if (!item || item.status === 'deleted') continue;
+        total += 1;
+        if (item.status === 'completed') done += 1;
+        else if (item.status === 'in_progress') active += 1;
+      }
+      if (total < 2 || done >= total || (done === 0 && active === 0)) return null;
+      return { total: total, done: done, active: active };
     }
 
     function createEtaPill(t, Tooltip) {
       return function EtaPill(props) {
         const running = props.useSession((s) => Boolean(s && s.running));
         const timings = props.useChat((s) => (s && s.legacy ? s.legacy.turnTimings : null));
+        const timeline = props.useChat((s) => (s ? s.timeline : null));
+        /* FIX: partial lives at s.legacy.partial, NOT s.partial (v1 read the wrong key). */
+        const partial = props.useChat((s) => (s && s.legacy ? s.legacy.partial : null));
         const nodes = props.useChat((s) => (s && s.legacy ? s.legacy.nodes : null));
-        const partial = props.useChat((s) => (s ? s.partial : null));
+        /* useProjection is a standard composer.dock prop. Always call exactly one
+         * function so React hook order stays stable even if the prop is absent. */
+        const readProjection = typeof props.useProjection === 'function'
+          ? props.useProjection
+          : function () { return null; };
+        const todos = readProjection('todos');
+
+        const modeState = React.useState(function () {
+          try { return window.localStorage.getItem(MODE_KEY) === 'estimate' ? 'estimate' : 'progress'; }
+          catch (error) { return 'progress'; }
+        });
+        const mode = modeState[0];
+        const setMode = modeState[1];
 
         const nowState = React.useState(function () { return Date.now(); });
         const now = nowState[0];
@@ -360,62 +483,84 @@ window.__ModuleLoader__.load({
         }
         if (!openTurn) return null;
 
-        /* Steps completed in the running turn: the streaming step index is the
-         * live signal; finalized assistant nodes of that turn are a floor. */
-        let stepsDone = 0;
-        if (partial && partial.turn === openTurn.turn && typeof partial.step === 'number') {
+        /* Exact count of step/end events so the model's x-axis matches the log. */
+        let stepsDone = closedSteps(timeline, openTurn.turn);
+        if (stepsDone === null && partial && partial.turn === openTurn.turn && typeof partial.step === 'number') {
           stepsDone = Math.max(0, partial.step - 1);
         }
-        if (nodes) {
+        if (stepsDone === null && nodes) {
           let finalized = 0;
           try {
             for (const node of nodes) {
               if (node && node.kind === 'assistant' && node.turn === openTurn.turn) finalized += 1;
             }
-          } catch (error) {
-            console.error('eta-estimate: node scan failed', error);
-          }
-          stepsDone = Math.max(stepsDone, finalized);
+          } catch (error) { /* ignore */ }
+          stepsDone = finalized;
         }
+        if (stepsDone === null) stepsDone = 0;
 
-        const elapsed = Math.max(0, now - openTurn.startTime);
-        const info = remainingSteps(stepsDone);
-
-        const remLow = info.row[0] * STEP_PACE_MS;
-        const remMid = info.row[1] * STEP_PACE_MS;
-        const remHigh = info.row[2] * STEP_PACE_MS;
-
-        const low = Math.max(STEP_PACE_MS * 0.6, remLow / WIDEN);
-        const high = Math.max(remHigh * WIDEN, remMid * 1.8);
+        const elapsedMs = Math.max(0, now - openTurn.startTime);
+        const elapsedSec = elapsedMs / 1000;
+        const plan = planInfo(todos);
+        const est = estimateRemaining(elapsedSec, stepsDone);
+        const pct = elapsedPercentile(elapsedSec);
+        const elapsedText = formatElapsed(elapsedSec, t);
+        const nextMode = mode === 'progress' ? t('eta.mode.estimate') : t('eta.mode.progress');
 
         let label;
-        if (remMid < 20000) {
-          label = t('eta.soon');
-        } else if (info.beyond && sampleCount === 0) {
-          label = t('eta.unknown');
-        } else if (elapsed > remHigh * 2.5 && elapsed > 180000) {
-          label = t('eta.late');
+        let tooltip;
+        if (mode === 'progress' && plan) {
+          label = t('eta.plan', { done: String(plan.done), total: String(plan.total), elapsed: elapsedText });
+          tooltip = t('eta.tip.plan')
+            + ' · ' + t('eta.tip.pct', { pct: String(pct) })
+            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
+            + ' · ' + t('eta.tip.toggle', { next: nextMode });
+        } else if (mode === 'progress') {
+          label = t('eta.facts', { elapsed: elapsedText, step: String(stepsDone) });
+          tooltip = t('eta.tip.facts')
+            + ' · ' + t('eta.tip.pct', { pct: String(pct) })
+            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
+            + ' · ' + t('eta.tip.toggle', { next: nextMode });
         } else {
-          label = t('eta.range', {
-            low: formatCoarse(low, t),
-            high: formatCoarse(high, t),
-          });
+          const lowText = formatCoarse(est.low, t);
+          const highText = formatCoarse(est.high, t);
+          if (est.mid < 15) {
+            label = t('eta.soon');
+          } else if (lowText === highText) {
+            label = t('eta.about', { v: lowText });
+          } else {
+            label = t('eta.range', { low: lowText, high: highText });
+          }
+          tooltip = t('eta.tip.coverage')
+            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
+            + ' · ' + t('eta.tip.reference')
+            + ' · ' + t('eta.tip.facts')
+            + ' · ' + t('eta.tip.toggle', { next: nextMode });
         }
 
-        const basis = t('eta.tip.basis', { step: String(stepsDone), turns: String(sampleCount) });
-        const tooltip = basis
-          + (info.beyond ? ' · ' + t('eta.tip.wide') : '')
-          + ' · ' + t('eta.tip.reference');
+        const toggleMode = function () {
+          const next = mode === 'progress' ? 'estimate' : 'progress';
+          setMode(next);
+          try { window.localStorage.setItem(MODE_KEY, next); } catch (error) { /* storage optional */ }
+        };
 
-        /* Same DOM shape as the host's PlainPill:
-         * span[data-composer-stat] > Tooltip > span.pill > icon + span.label */
+        /* Same DOM shape as the host's PlainPill. */
         return h(
           React.Fragment,
           null,
           h('style', null, CSS),
           h('span', { className: 'dshEta_anchor', 'data-composer-stat': 'eta-estimate' },
             h(Tooltip, { label: tooltip },
-              h('span', { className: 'dshEta_pill' },
+              h('span', {
+                className: 'dshEta_pill',
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': tooltip,
+                onClick: toggleMode,
+                onKeyDown: function (event) {
+                  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleMode(); }
+                },
+              },
                 h(ClockIcon, null),
                 h('span', { className: 'dshEta_label' }, label)
               )

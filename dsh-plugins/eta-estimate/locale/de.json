@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Verbleibende Zeit schätzen",
-    "description": "Zeigt neben dem Eingabefeld live eine Schätzung der verbleibenden Zeit für die aktuelle Aufgabe."
+    "description": "Zeigt exakten Fortschritt (Zeit, Schritte, Plan) neben dem Composer; ein Klick wechselt zur kalibrierten Restzeitschätzung."
   }
 }

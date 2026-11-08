@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Estimación del tiempo restante",
-    "description": "Muestra junto al compositor una estimación en vivo del tiempo restante de la tarea actual."
+    "description": "Muestra el progreso exacto (tiempo, pasos, plan) junto al compositor; un clic cambia a la estimación calibrada."
   }
 }

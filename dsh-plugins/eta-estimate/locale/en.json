@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Remaining time estimate",
-    "description": "Shows a live estimate of the time left for the current task beside the composer."
+    "description": "Shows exact task progress (elapsed time, step, plan) beside the composer, with a calibrated remaining-time estimate one click away."
   }
 }
