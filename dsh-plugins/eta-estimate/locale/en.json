@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remaining time estimate",
+    "description": "Shows a live estimate of the time left for the current task beside the composer."
+  }
+}

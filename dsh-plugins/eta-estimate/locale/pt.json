@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Estimativa de tempo restante",
+    "description": "Mostra abaixo do compositor uma estimativa em tempo real do tempo restante da tarefa atual."
+  }
+}
