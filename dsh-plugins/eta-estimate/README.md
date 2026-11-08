@@ -18,6 +18,15 @@ plugin_manager: action=install_bundle
 github:x-ww/kit#path:dsh-plugins/eta-estimate
 ```
 
+在 Web 界面操作：侧栏「插件」→「添加插件」，把上面这串**直接粘进输入框**即可，
+不需要点「填入示例」，也不需要克隆。引导区显示的 `dsh-plugin-whale-pet` 只是 npm
+包名示例；这个输入框的说明是「输入插件的包名、GitHub 仓库地址或本地目录路径」，
+Git 地址同样接受。
+
+注意：Git 方式从 `codeload.github.com` 下载，切换「安装源」（如中国大陆镜像源）
+不影响这一步——镜像只提供 registry 里的包，不代替 GitHub 仓库下载。若某台机器
+访问 GitHub 不稳，界面会提示「无法访问 GitHub」。
+
 `#path:` 是 pnpm 的 git 子目录语法——因为本包位于 kit 仓库的
 `dsh-plugins/eta-estimate/` 而非仓库根，pnpm 会只取出该子目录作为包。
 直接写 `github:x-ww/kit` 会指向仓库根（那里没有 `package.json`），会安装失败。
