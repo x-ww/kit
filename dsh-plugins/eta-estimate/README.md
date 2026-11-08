@@ -5,23 +5,53 @@ DeepSeek Harness 的 Web UI 插件：任务运行期间在输入框下方显示�
 
 ## 安装到其他机器 / Install on another machine
 
-1. 克隆仓库（任意目录）：
+**不需要手动克隆。** `install_bundle` 支持 git 来源，一行即可：
 
-   ```bash
-   git clone https://github.com/x-ww/kit.git
-   ```
+```
+plugin_manager: action=install_bundle
+                target=github:x-ww/kit#path:dsh-plugins/eta-estimate
+```
 
-2. 在 DeepSeek Harness 里安装该目录（绝对路径）：
+或在 Web 插件管理页的「安装」框里粘贴：
 
-   ```
-   plugin_manager: action=install_bundle
-                   target=/绝对路径/kit/dsh-plugins/eta-estimate
-   ```
+```
+github:x-ww/kit#path:dsh-plugins/eta-estimate
+```
 
-   也可以用 `dsh` 的插件管理界面 → 安装本地 bundle，选择这个目录。
-   安装为本地目录链接（`link:`），之后 `git pull` 更新即生效，但需要重装一次并在页面刷新后加载新模块。
+`#path:` 是 pnpm 的 git 子目录语法——因为本包位于 kit 仓库的
+`dsh-plugins/eta-estimate/` 而非仓库根，pnpm 会只取出该子目录作为包。
+直接写 `github:x-ww/kit` 会指向仓库根（那里没有 `package.json`），会安装失败。
 
-3. 刷新 Web 页面。插件只在「任务运行中」时出现，空闲时隐藏。
+已实测（pnpm 11.28.5 + DSH 0.2.2-rc.1）：解析为 `@local/eta-estimate 1.2.0`，
+解包后只含插件的 14 个文件，不会带入仓库根的 EPG/播放列表等文件。
+
+也可用完整 URL，等价：
+
+```
+https://github.com/x-ww/kit#path:dsh-plugins/eta-estimate
+```
+
+安装后**刷新 Web 页面**加载客户端模块。插件只在「任务运行中」时出现，空闲时隐藏。
+
+### 备选：手动克隆
+
+如果需要改代码或在离线环境使用，可以克隆后指向本地目录（必须用绝对路径）：
+
+```bash
+git clone https://github.com/x-ww/kit.git
+```
+
+```
+plugin_manager: action=install_bundle
+                target=/绝对路径/kit/dsh-plugins/eta-estimate
+```
+
+这种方式装为 `link:` 链接，改本地文件后需重装一次并刷新页面。
+
+### 更新
+
+git 方式安装的包固定到某个 commit。仓库更新后，在插件管理页先卸载再重新安装
+（`plugin_manager: remove_bundle` → `install_bundle`），或在 Web 页面使用更新入口。
 
 依赖：无需 npm 依赖、无需构建步骤；Host 半是空实现，全部逻辑在 `client.js`。
 
