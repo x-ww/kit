@@ -3,6 +3,9 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
+    /* react-dom is a standard browser-table module; degrade gracefully if absent. */
+    let ReactDOM = null;
+    try { ReactDOM = require('react-dom'); } catch (error) { /* no portal: render bubble inline */ }
 
     const NS = 'eta-estimate';
 
@@ -135,12 +138,172 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /**
+     * Copied from the shipped StatsPills.module.css and Tooltip.module.css, with
+     * class names renamed under this plugin's prefix. Only DSH theme variables
+     * are referenced, so light/dark switching and font-size settings follow the
+     * host automatically. The Harness primitives package is deliberately NOT
+     * required: it changes without notice and a throwing import would blank the
+     * whole slot entry.
+     */
     const CSS = [
+      /* StatsPills: anchor / pill / label / separator */
       '.dshEta_anchor{min-width:0;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));display:inline-flex}',
-      '.dshEta_pill{box-sizing:border-box;border-radius:var(--dsw-radius-sm);max-width:100%;color:var(--dsw-alias-label-secondary);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;background:0 0;border:none;align-items:center;gap:6px;padding:1px 8px;display:inline-flex}',
+      '.dshEta_pill{box-sizing:border-box;border-radius:var(--dsw-radius-sm);max-width:100%;color:var(--dsw-alias-label-tertiary);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;background:0 0;border:none;align-items:center;gap:6px;padding:1px 8px;display:inline-flex}',
       '.dshEta_pill svg{flex:none;width:14px;height:14px}',
+      'button.dshEta_pill{cursor:pointer}',
+      'button.dshEta_pill[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+      '@media (hover:hover){button.dshEta_pill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}}',
       '.dshEta_label{text-overflow:ellipsis;min-width:0;overflow:hidden}',
+      /* Tooltip bubble / label */
+      '.dshEta_tipBubble{display:inline-flex;align-items:safe center;gap:8px;position:fixed;z-index:1100;width:max-content;box-sizing:border-box;max-width:min(50vw,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:3px 7px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-static-neutral-bluish-00);font-size:13px;line-height:20px;white-space:pre-line;overflow-wrap:break-word;pointer-events:none;animation:dshEta_tipIn .15s var(--ds-ease-in-out,ease-in-out);transform:translate(-50%,-100%)}',
+      '.dshEta_tipBubble[data-pinned]{pointer-events:auto}',
+      '.dshEta_tipLabel{min-width:0}',
+      '@keyframes dshEta_tipIn{0%{opacity:0}}',
+      '@media(prefers-reduced-motion:reduce){.dshEta_tipBubble{animation:none}}',
     ].join('');
+
+    /**
+     * The shipped `clock-outline` regular icon (16x16, 1px stroke, currentColor).
+     * Inlined rather than taken from the primitives sprite, which the plugin may
+     * not load. `data-icon` matches the host's icon naming convention.
+     */
+    function ClockIcon() {
+      return h('svg', {
+        viewBox: '0 0 16 16', width: 16, height: 16,
+        fill: 'none', strokeWidth: 1,
+        'data-icon': 'clock-outline', 'aria-hidden': 'true',
+      },
+        h('path', {
+          d: 'M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z',
+          stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round',
+        }),
+        h('path', {
+          d: 'M8 4.31V8.46L11 10.08',
+          stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round',
+        })
+      );
+    }
+
+    /**
+     * A small copy of the host Tooltip's behavior: 200ms hover delay, focus,
+     * click-to-pin, Escape/Tab dismissal, side=top with an 8px gap, portal to
+     * document.body, role="tooltip". `onlyWhenClipped` is intentionally not
+     * applied: the host uses the bubble for a truncated reading, while this one
+     * carries the estimate's basis and is useful whenever the pointer rests.
+     */
+    function createTooltip() {
+      return function Tooltip(props) {
+        const label = props.label;
+        const children = props.children;
+        const state = React.useState(false);
+        const open = state[0];
+        const setOpen = state[1];
+        const pinnedState = React.useState(false);
+        const pinned = pinnedState[0];
+        const setPinned = pinnedState[1];
+        const rectState = React.useState(null);
+        const rect = rectState[0];
+        const setRect = rectState[1];
+        const timer = React.useRef(null);
+        const anchor = React.useRef(null);
+        const bubbleId = React.useId ? React.useId() : 'dshEta_tip';
+
+        const clear = function () {
+          if (timer.current !== null) { clearTimeout(timer.current); timer.current = null; }
+        };
+        const show = function () {
+          const el = anchor.current;
+          if (el === null) return;
+          setRect(el.getBoundingClientRect());
+          setOpen(true);
+        };
+        const schedule = function () {
+          clear();
+          timer.current = setTimeout(show, 200);
+        };
+        const dismiss = function () {
+          clear();
+          setPinned(false);
+          setOpen(false);
+          setRect(null);
+        };
+        const hide = function () {
+          clear();
+          if (pinned) return;
+          setOpen(false);
+          setRect(null);
+        };
+
+        React.useEffect(function () {
+          return function () { clear(); };
+        }, []);
+        React.useEffect(function () {
+          if (!open) return undefined;
+          const onKey = function (event) {
+            if (event.key === 'Escape' || event.key === 'Tab') {
+              if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+              dismiss();
+            }
+          };
+          document.addEventListener('keydown', onKey, true);
+          return function () { document.removeEventListener('keydown', onKey, true); };
+        }, [open]);
+
+        const bubble = (open && rect !== null)
+          ? h('span', {
+            id: bubbleId,
+            className: 'dshEta_tipBubble',
+            'data-side': 'top',
+            'data-portal': 'true',
+            'data-pinned': pinned ? 'true' : undefined,
+            'data-align': 'center',
+            role: 'tooltip',
+            style: {
+              left: rect.left + rect.width / 2,
+              top: Math.max(12, rect.top - 8),
+              visibility: 'visible',
+            },
+          }, h('span', { className: 'dshEta_tipLabel' }, label))
+          : null;
+
+        const trigger = React.cloneElement(children, {
+          ref: anchor,
+          'aria-describedby': open ? bubbleId : undefined,
+          onPointerEnter: function (event) {
+            if (children.props.onPointerEnter) children.props.onPointerEnter(event);
+            if (event.pointerType !== 'touch') schedule();
+          },
+          onPointerLeave: function (event) {
+            if (children.props.onPointerLeave) children.props.onPointerLeave(event);
+            hide();
+          },
+          onPointerDown: function (event) {
+            if (children.props.onPointerDown) children.props.onPointerDown(event);
+            if (event.pointerType === 'touch' && !pinned) dismiss();
+          },
+          onClick: function (event) {
+            if (children.props.onClick) children.props.onClick(event);
+            clear();
+            setPinned(true);
+            show();
+          },
+          onFocus: function (event) {
+            if (children.props.onFocus) children.props.onFocus(event);
+            schedule();
+          },
+          onBlur: function (event) {
+            if (children.props.onBlur) children.props.onBlur(event);
+            hide();
+          },
+        });
+
+        const portal = (bubble !== null && ReactDOM && typeof ReactDOM.createPortal === 'function')
+          ? ReactDOM.createPortal(bubble, document.body)
+          : bubble;
+        return h(React.Fragment, null, trigger, portal);
+      };
+    }
 
     function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
@@ -166,7 +329,7 @@ window.__ModuleLoader__.load({
       return { row: [d * 0.5, d * 0.8, d * 1.8], beyond: true };
     }
 
-    function createEtaPill(t) {
+    function createEtaPill(t, Tooltip) {
       return function EtaPill(props) {
         const running = props.useSession((s) => Boolean(s && s.running));
         const timings = props.useChat((s) => (s && s.legacy ? s.legacy.turnTimings : null));
@@ -244,31 +407,18 @@ window.__ModuleLoader__.load({
           + (info.beyond ? ' · ' + t('eta.tip.wide') : '')
           + ' · ' + t('eta.tip.reference');
 
+        /* Same DOM shape as the host's PlainPill:
+         * span[data-composer-stat] > Tooltip > span.pill > icon + span.label */
         return h(
           React.Fragment,
           null,
           h('style', null, CSS),
-          h(
-            'span',
-            { className: 'dshEta_anchor', 'data-composer-stat': 'eta-estimate', title: tooltip },
-            h(
-              'span',
-              { className: 'dshEta_pill' },
-              h(
-                'svg',
-                {
-                  viewBox: '0 0 16 16', width: 14, height: 14,
-                  fill: 'none', stroke: 'currentColor', strokeWidth: 1.3,
-                  strokeLinecap: 'round', strokeLinejoin: 'round',
-                  'aria-hidden': 'true',
-                  style: { color: 'var(--dsw-alias-brand-primary)' },
-                },
-                h('path', { d: 'M4.5 2h7M4.5 14h7' }),
-                h('path', { d: 'M5.5 2.6v2.1c0 1.3.7 2.5 1.8 3.1L8 8.2l.7-.4c1.1-.6 1.8-1.8 1.8-3.1V2.6' }),
-                h('path', { d: 'M5.5 13.4v-2.1c0-1.3.7-2.5 1.8-3.1l.7-.4.7.4c1.1.6 1.8 1.8 1.8 3.1v2.1' }),
-                h('path', { d: 'M6.7 11.2h2.6' })
-              ),
-              h('span', { className: 'dshEta_label' }, label)
+          h('span', { className: 'dshEta_anchor', 'data-composer-stat': 'eta-estimate' },
+            h(Tooltip, { label: tooltip },
+              h('span', { className: 'dshEta_pill' },
+                h(ClockIcon, null),
+                h('span', { className: 'dshEta_label' }, label)
+              )
             )
           )
         );
@@ -291,7 +441,8 @@ window.__ModuleLoader__.load({
           t = fallbackTranslate();
         }
 
-        const Pill = createEtaPill(t);
+        const Tooltip = createTooltip();
+        const Pill = createEtaPill(t, Tooltip);
         ctx.slots.inject('conversation.composer.dock', function () {
           return ctx.slots.register({
             name: 'conversation.composer.dock',
