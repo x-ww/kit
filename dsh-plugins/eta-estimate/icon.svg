@@ -1,22 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect x="0" y="0" width="64" height="64" rx="15" fill="#f6f4ee"/>
-  <!-- countdown ticks: 8 around the dial; top-right one is "remaining" in signal red -->
-  <g stroke="#2b2b2b" stroke-width="2.2" stroke-linecap="round" opacity="0.22">
-    <path d="M32 11.5v3.4"/>
-    <path d="M13.4 46.4l2.4-2.4"/>
-    <path d="M10.6 32h3.4"/>
-    <path d="M13.4 17.6l2.4 2.4"/>
-    <path d="M32 52.5v-3.4"/>
-    <path d="M50.6 46.4l-2.4-2.4"/>
-    <path d="M53.4 32h-3.4"/>
-  </g>
-  <path d="M50.6 17.6l-2.4 2.4" stroke="#d94f30" stroke-width="2.4" stroke-linecap="round"/>
-  <!-- dial -->
-  <circle cx="32" cy="28" r="16" fill="none" stroke="#2b2b2b" stroke-width="2.8"/>
-  <!-- hands: classic ~10:10 watch pose -->
-  <path d="M32 28 L26.5 23" stroke="#2b2b2b" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M32 28 L32 16.5" stroke="#2b2b2b" stroke-width="2.5" stroke-linecap="round"/>
-  <circle cx="32" cy="28" r="1.9" fill="#2b2b2b"/>
-  <!-- monogram, tucked just below the dial -->
-  <text x="32" y="53.5" font-family="ui-monospace,'SF Mono','Roboto Mono',monospace" font-size="11" font-weight="700" letter-spacing="2.2" fill="#2b2b2b" text-anchor="middle">ETA</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none">
+  <defs>
+    <linearGradient id="eta" x1="8" y1="8" x2="28" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67C7FE"/>
+      <stop offset="1" stop-color="#4A5FE8"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="24" height="24" rx="6" fill="url(#eta)" fill-opacity="0.9"/>
+  <circle cx="18" cy="18" r="9" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-opacity="0.95"/>
+  <path d="M18 12.5V18L22 20" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
