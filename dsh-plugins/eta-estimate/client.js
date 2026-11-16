@@ -99,19 +99,6 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** What fraction of past finished tasks were shorter than this elapsed time. */
-    function elapsedPercentile(elapsedSec) {
-      const pts = MODEL.percentilePoints;
-      const vals = MODEL.durationPercentiles;
-      if (elapsedSec <= vals[0]) return 0;
-      for (let i = 1; i < vals.length; i += 1) {
-        if (elapsedSec <= vals[i]) {
-          const frac = (elapsedSec - vals[i - 1]) / Math.max(0.001, vals[i] - vals[i - 1]);
-          return clamp(Math.round((pts[i - 1] + frac * (pts[i] - pts[i - 1])) * 100), 0, 99);
-        }
-      }
-      return 99;
-    }
 
     /** Coarse units: a second-accurate number here would be false precision. */
     function formatCoarse(sec, t) {
@@ -140,14 +127,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'under a minute',
         'eta.mode.progress': 'facts only',
         'eta.mode.estimate': 'time estimate',
-        'eta.tip.basis': 'Based on {turns} past tasks, {probes} sample points',
-        'eta.tip.coverage': 'About 80% of past tasks fall inside this range',
-        'eta.tip.facts': 'Elapsed time and step count are exact, not estimates',
-        'eta.tip.plan': 'Task progress is exact, not a prediction',
-        'eta.tip.pct': 'Already longer than {pct}% of past tasks',
-        'eta.tip.reference': 'Remaining time cannot be predicted precisely — rough guide only',
-        'eta.tip.toggle': 'Click to switch to {next}',
-        'eta.tip.width': 'Task durations span 0.1s to 73min, so this band is always ~32x wide; the mid-value has ~70% relative error.',
+        'eta.tip.toggle': 'Click to switch to {next}'
       },
       zh: {
         'eta.range': '预计剩余 ≈ {low}–{high}',
@@ -160,14 +140,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': '不到 1 分钟',
         'eta.mode.progress': '仅看进度',
         'eta.mode.estimate': '时间预估',
-        'eta.tip.basis': '基于 {turns} 个历史任务、{probes} 个采样时点回测',
-        'eta.tip.coverage': '约 80% 的历史任务剩余时间落在此区间',
-        'eta.tip.facts': '已用时与步数是精确值，不含预测',
-        'eta.tip.plan': '任务进度是确定值，不含预测',
-        'eta.tip.pct': '本次已用时超过 {pct}% 的历史任务',
-        'eta.tip.reference': '剩余时间无法精确预测，仅供参考',
-        'eta.tip.toggle': '点击切换为「{next}」',
-        'eta.tip.width': '历史任务时长跨度 0.1s~73min，本区间恒宽约 32 倍；中值误差约 70%。',
+        'eta.tip.toggle': '点击切换为「{next}」'
       },
       ja: {
         'eta.range': '残り ≈ {low}–{high}',
@@ -180,14 +153,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': '1分未満',
         'eta.mode.progress': '進捗のみ',
         'eta.mode.estimate': '残り時間',
-        'eta.tip.basis': '過去 {turns} タスク、{probes} 時点で検証',
-        'eta.tip.coverage': '約 80% の過去タスクがこの範囲に収まります',
-        'eta.tip.facts': '経過時間とステップ数は実測値です',
-        'eta.tip.plan': 'タスク進捗は実測値です',
-        'eta.tip.pct': '過去タスクの {pct}% より長く経過',
-        'eta.tip.reference': '残り時間は正確に予測できません。目安のみ',
-        'eta.tip.toggle': 'クリックで「{next}」に切替',
-        'eta.tip.width': 'タスク所要時間は 0.1秒〜73分と幅があるため、このレンジは常に約32倍の幅になります。中央値の相対誤差は約70%。',
+        'eta.tip.toggle': 'クリックで「{next}」に切替'
       },
       es: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -200,14 +166,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'menos de un minuto',
         'eta.mode.progress': 'solo progreso',
         'eta.mode.estimate': 'estimación de tiempo',
-        'eta.tip.basis': 'Basado en {turns} tareas previas y {probes} puntos',
-        'eta.tip.coverage': 'Cerca del 80% de las tareas previas cae en este rango',
-        'eta.tip.facts': 'El tiempo transcurrido y los pasos son valores exactos',
-        'eta.tip.plan': 'El progreso de la tarea es un valor exacto',
-        'eta.tip.pct': 'Ya supera al {pct}% de las tareas previas',
-        'eta.tip.reference': 'El tiempo restante no se puede predecir con precisión',
-        'eta.tip.toggle': 'Haz clic para cambiar a «{next}»',
-        'eta.tip.width': 'Las duraciones van de 0,1 s a 73 min; este rango siempre es ~32x más ancho y el valor central tiene ~70% de error relativo.',
+        'eta.tip.toggle': 'Haz clic para cambiar a «{next}»'
       },
       fr: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -220,14 +179,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'moins d’une minute',
         'eta.mode.progress': 'progression seule',
         'eta.mode.estimate': 'estimation du temps',
-        'eta.tip.basis': 'Basé sur {turns} tâches passées et {probes} points',
-        'eta.tip.coverage': 'Environ 80% des tâches passées tombent dans cette plage',
-        'eta.tip.facts': 'Le temps écoulé et les étapes sont des valeurs exactes',
-        'eta.tip.plan': 'La progression de la tâche est une valeur exacte',
-        'eta.tip.pct': 'Déjà plus long que {pct}% des tâches passées',
-        'eta.tip.reference': 'Le temps restant ne peut pas être prédit précisément',
-        'eta.tip.toggle': 'Cliquez pour passer à « {next} »',
-        'eta.tip.width': 'Les durées vont de 0,1 s à 73 min ; cette plage est donc toujours ~32x plus large et la valeur médiane a ~70 % d’erreur relative.',
+        'eta.tip.toggle': 'Cliquez pour passer à « {next} »'
       },
       de: {
         'eta.range': '≈ {low}–{high} verbleibend',
@@ -240,14 +192,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'unter einer Minute',
         'eta.mode.progress': 'nur Fortschritt',
         'eta.mode.estimate': 'Zeitschätzung',
-        'eta.tip.basis': 'Basierend auf {turns} früheren Aufgaben, {probes} Messpunkten',
-        'eta.tip.coverage': 'Rund 80% der früheren Aufgaben liegen in diesem Bereich',
-        'eta.tip.facts': 'Vergangene Zeit und Schritte sind exakte Werte',
-        'eta.tip.plan': 'Der Aufgabenfortschritt ist ein exakter Wert',
-        'eta.tip.pct': 'Bereits länger als {pct}% der früheren Aufgaben',
-        'eta.tip.reference': 'Die Restzeit lässt sich nicht genau vorhersagen',
-        'eta.tip.toggle': 'Klicken, um zu „{next}“ zu wechseln',
-        'eta.tip.width': 'Aufgaben dauern 0,1 s bis 73 min, daher ist dieses Band immer ~32x breiter; der Mittelwert hat ~70 % relative Abweichung.',
+        'eta.tip.toggle': 'Klicken, um zu „{next}“ zu wechseln'
       },
       ru: {
         'eta.range': '≈ {low}–{high} осталось',
@@ -260,14 +205,7 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'меньше минуты',
         'eta.mode.progress': 'только прогресс',
         'eta.mode.estimate': 'оценка времени',
-        'eta.tip.basis': 'По {turns} прошлым задачам и {probes} точкам',
-        'eta.tip.coverage': 'Около 80% прошлых задач попадают в этот диапазон',
-        'eta.tip.facts': 'Прошедшее время и число шагов — точные значения',
-        'eta.tip.plan': 'Прогресс задачи — точное значение',
-        'eta.tip.pct': 'Уже дольше {pct}% прошлых задач',
-        'eta.tip.reference': 'Оставшееся время нельзя предсказать точно',
-        'eta.tip.toggle': 'Нажмите, чтобы переключить на «{next}»',
-        'eta.tip.width': 'Длительность задач — от 0,1 с до 73 мин, поэтому этот диапазон всегда ~32x шире; у среднего значения ~70% относительная ошибка.',
+        'eta.tip.toggle': 'Нажмите, чтобы переключить на «{next}»'
       },
       pt: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -280,15 +218,8 @@ window.__ModuleLoader__.load({
         'eta.under1m': 'menos de um minuto',
         'eta.mode.progress': 'apenas progresso',
         'eta.mode.estimate': 'estimativa de tempo',
-        'eta.tip.basis': 'Com base em {turns} tarefas anteriores e {probes} pontos',
-        'eta.tip.coverage': 'Cerca de 80% das tarefas anteriores caem neste intervalo',
-        'eta.tip.facts': 'Tempo decorrido e passos são valores exatos',
-        'eta.tip.plan': 'O progresso da tarefa é um valor exato',
-        'eta.tip.pct': 'Já mais longo que {pct}% das tarefas anteriores',
-        'eta.tip.reference': 'O tempo restante não pode ser previsto com precisão',
-        'eta.tip.toggle': 'Clique para mudar para «{next}»',
-        'eta.tip.width': 'As durações vão de 0,1 s a 73 min; esta faixa é sempre ~32x mais larga e o valor médio tem ~70% de erro relativo.',
-      },
+        'eta.tip.toggle': 'Clique para mudar para «{next}»'
+      }
     };
 
     function fallbackTranslate() {
@@ -585,7 +516,6 @@ window.__ModuleLoader__.load({
         const openStepSec = st.openElapsed;
         const plan = planInfo(todos);
         const est = estimateRemaining(elapsedSec, stepsDone, medStepSec, openStepSec);
-        const pct = elapsedPercentile(elapsedSec);
         const elapsedText = formatElapsed(elapsedSec, t);
         const nextMode = mode === 'progress' ? t('eta.mode.estimate') : t('eta.mode.progress');
 
@@ -593,16 +523,10 @@ window.__ModuleLoader__.load({
         let tooltip;
         if (mode === 'progress' && plan) {
           label = t('eta.plan', { done: String(plan.done), total: String(plan.total), elapsed: elapsedText });
-          tooltip = t('eta.tip.plan')
-            + ' · ' + t('eta.tip.pct', { pct: String(pct) })
-            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
-            + ' · ' + t('eta.tip.toggle', { next: nextMode });
+          tooltip = t('eta.tip.toggle', { next: nextMode });
         } else if (mode === 'progress') {
           label = t('eta.facts', { elapsed: elapsedText, step: String(stepsDone) });
-          tooltip = t('eta.tip.facts')
-            + ' · ' + t('eta.tip.pct', { pct: String(pct) })
-            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
-            + ' · ' + t('eta.tip.toggle', { next: nextMode });
+          tooltip = t('eta.tip.toggle', { next: nextMode });
         } else {
           const lowText = formatCoarse(est.low, t);
           const highText = formatCoarse(est.high, t);
@@ -613,11 +537,7 @@ window.__ModuleLoader__.load({
           } else {
             label = t('eta.range', { low: lowText, high: highText });
           }
-          tooltip = t('eta.tip.coverage')
-            + ' · ' + t('eta.tip.width')
-            + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
-            + ' · ' + t('eta.tip.facts')
-            + ' · ' + t('eta.tip.toggle', { next: nextMode });
+          tooltip = t('eta.tip.toggle', { next: nextMode });
         }
 
         const toggleMode = function () {
