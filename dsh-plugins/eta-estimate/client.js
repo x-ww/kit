@@ -147,6 +147,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Already longer than {pct}% of past tasks',
         'eta.tip.reference': 'Remaining time cannot be predicted precisely — rough guide only',
         'eta.tip.toggle': 'Click to switch to {next}',
+        'eta.tip.width': 'Task durations span 0.1s to 73min, so this band is always ~32x wide; the mid-value has ~70% relative error.',
       },
       zh: {
         'eta.range': '预计剩余 ≈ {low}–{high}',
@@ -166,6 +167,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': '本次已用时超过 {pct}% 的历史任务',
         'eta.tip.reference': '剩余时间无法精确预测，仅供参考',
         'eta.tip.toggle': '点击切换为「{next}」',
+        'eta.tip.width': '历史任务时长跨度 0.1s~73min，本区间恒宽约 32 倍；中值误差约 70%。',
       },
       ja: {
         'eta.range': '残り ≈ {low}–{high}',
@@ -185,6 +187,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': '過去タスクの {pct}% より長く経過',
         'eta.tip.reference': '残り時間は正確に予測できません。目安のみ',
         'eta.tip.toggle': 'クリックで「{next}」に切替',
+        'eta.tip.width': 'タスク所要時間は 0.1秒〜73分と幅があるため、このレンジは常に約32倍の幅になります。中央値の相対誤差は約70%。',
       },
       es: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -204,6 +207,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Ya supera al {pct}% de las tareas previas',
         'eta.tip.reference': 'El tiempo restante no se puede predecir con precisión',
         'eta.tip.toggle': 'Haz clic para cambiar a «{next}»',
+        'eta.tip.width': 'Las duraciones van de 0,1 s a 73 min; este rango siempre es ~32x más ancho y el valor central tiene ~70% de error relativo.',
       },
       fr: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -223,6 +227,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Déjà plus long que {pct}% des tâches passées',
         'eta.tip.reference': 'Le temps restant ne peut pas être prédit précisément',
         'eta.tip.toggle': 'Cliquez pour passer à « {next} »',
+        'eta.tip.width': 'Les durées vont de 0,1 s à 73 min ; cette plage est donc toujours ~32x plus large et la valeur médiane a ~70 % d’erreur relative.',
       },
       de: {
         'eta.range': '≈ {low}–{high} verbleibend',
@@ -242,6 +247,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Bereits länger als {pct}% der früheren Aufgaben',
         'eta.tip.reference': 'Die Restzeit lässt sich nicht genau vorhersagen',
         'eta.tip.toggle': 'Klicken, um zu „{next}“ zu wechseln',
+        'eta.tip.width': 'Aufgaben dauern 0,1 s bis 73 min, daher ist dieses Band immer ~32x breiter; der Mittelwert hat ~70 % relative Abweichung.',
       },
       ru: {
         'eta.range': '≈ {low}–{high} осталось',
@@ -261,6 +267,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Уже дольше {pct}% прошлых задач',
         'eta.tip.reference': 'Оставшееся время нельзя предсказать точно',
         'eta.tip.toggle': 'Нажмите, чтобы переключить на «{next}»',
+        'eta.tip.width': 'Длительность задач — от 0,1 с до 73 мин, поэтому этот диапазон всегда ~32x шире; у среднего значения ~70% относительная ошибка.',
       },
       pt: {
         'eta.range': '≈ {low}–{high} restantes',
@@ -280,6 +287,7 @@ window.__ModuleLoader__.load({
         'eta.tip.pct': 'Já mais longo que {pct}% das tarefas anteriores',
         'eta.tip.reference': 'O tempo restante não pode ser previsto com precisão',
         'eta.tip.toggle': 'Clique para mudar para «{next}»',
+        'eta.tip.width': 'As durações vão de 0,1 s a 73 min; esta faixa é sempre ~32x mais larga e o valor médio tem ~70% de erro relativo.',
       },
     };
 
@@ -606,8 +614,8 @@ window.__ModuleLoader__.load({
             label = t('eta.range', { low: lowText, high: highText });
           }
           tooltip = t('eta.tip.coverage')
+            + ' · ' + t('eta.tip.width')
             + ' · ' + t('eta.tip.basis', { turns: String(MODEL.sampleTurns), probes: String(MODEL.sampleProbes) })
-            + ' · ' + t('eta.tip.reference')
             + ' · ' + t('eta.tip.facts')
             + ' · ' + t('eta.tip.toggle', { next: nextMode });
         }
