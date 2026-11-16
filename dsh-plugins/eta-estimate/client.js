@@ -507,9 +507,9 @@ window.__ModuleLoader__.load({
           if (est.mid < 15) {
             label = t('eta.soon');
           } else if (lowC === highC) {
-            label = '≈ ' + lowC;
+            label = lowC;
           } else {
-            label = '≈ ' + lowC + '–' + highC;
+            label = lowC + '–' + highC;
           }
           tooltip = t('eta.tip.toggle', { next: nextMode });
         }
