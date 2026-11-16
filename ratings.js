@@ -3,7 +3,7 @@
 // @name:en      Movie Ratings
 // @name:zh-CN   影评聚合
 // @namespace    https://github.com/x-ww/kit
-// @version      1.7.4
+// @version      1.8.0
 // @description  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
 // @description:en  Movie ratings aggregator for Douban/IMDb
 // @description:zh-CN  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
@@ -11,6 +11,7 @@
 // @match        *://movie.douban.com/subject/*
 // @match        *://www.douban.com/personage/*
 // @match        *://www.imdb.com/title/*
+// @match        *://imdb.com/title/*
 // @connect      movie.douban.com
 // @connect      www.omdbapi.com
 // @connect      p.media-imdb.com
@@ -124,7 +125,11 @@
       if (entry && Date.now() - entry.timestamp < (entry.ttl ?? CACHE_TTL)) {
         return entry.data;
       }
-    } catch {}
+    } catch (error) {
+      // 存储失败（被禁用/损坏/满）时缓存层整体失效，每次都会打网络，
+      // 打一行 warn 方便用户排查，而不是静默退化。
+      console.warn("[影评聚合] 读取缓存失败，本次请求将不命中缓存:", error);
+    }
     return null;
   }
 
@@ -143,7 +148,9 @@
       }
 
       GM_setValue(CACHE_KEY, JSON.stringify(cache));
-    } catch {}
+    } catch (error) {
+      console.warn("[影评聚合] 写入缓存失败，下次访问会重新请求:", error);
+    }
   }
 
   function resolveCacheTtl(result) {
@@ -152,6 +159,8 @@
     return isEmptySearch || isUnrated ? PENDING_CACHE_TTL : CACHE_TTL;
   }
 
+  // 转义 HTML 文本上下文里的特殊字符。
+  // 只覆盖文本/属性赋值；URL 类字段请配合 safeUrl 使用，不要在这里拼链接。
   function escapeHtml(value) {
     if (value == null) return "";
     return String(value)
@@ -159,7 +168,11 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+      .replace(/'/g, "&#39;")
+      // 换行/回车在属性值里会被折叠成空格，在文本节点里仍会被渲染成
+      // 新行；统一转成实体，避免外部数据里的换行破坏内联样式或 title。
+      .replace(/\n/g, "&#10;")
+      .replace(/\r/g, "&#13;");
   }
 
   function safeUrl(url) {
@@ -174,13 +187,30 @@
 
   // 用于存储活跃的 observer，以便页面卸载时清理
   const activeObservers = [];
+  // MutationObserver 回调去抖：用 requestIdleCallback（现代浏览器把回调排到
+  // 空闲帧，避免 React 连续重渲染时每次 mutation 都跑一遍 find）；
+  // 老浏览器退化成 setTimeout(0)。
+  const scheduleIdle =
+    typeof window !== "undefined" && window.requestIdleCallback
+      ? window.requestIdleCallback.bind(window)
+      : (fn) => setTimeout(fn, 0);
+
+  // 把重复的「断开 observer + 从 activeObservers 里移除」收敛成一处，
+  // 避免各处 catch {} 吞掉异常导致 observer 泄漏。
+  function finishObserver(observer) {
+    try {
+      observer.disconnect();
+    } catch {}
+    const idx = activeObservers.indexOf(observer);
+    if (idx !== -1) activeObservers.splice(idx, 1);
+  }
 
   // ─── 网络请求 ───
 
   /**
-   * 单次请求，返回 { text, shouldRetry }
-   * - 网络错误 / 5xx：shouldRetry = true
-   * - 4xx 及其他客户端错误：shouldRetry = false（重试无意义）
+   * 单次请求，返回 { text, shouldRetry, status, retryAfter }
+   * - 网络错误 / 5xx / 429：shouldRetry = true（429 带上 retryAfter 毫秒数）
+   * - 其他 4xx 客户端错误：shouldRetry = false（重试无意义）
    */
   function gmRequestSingle(url) {
     return new Promise((resolve) => {
@@ -198,14 +228,35 @@
             resolve({ text: response.responseText, shouldRetry: false });
             return;
           }
-          // 5xx 服务端错误可重试；4xx 客户端错误无需重试
-          const shouldRetry = response.status >= 500;
+          const status = response.status;
+          // 429（限流）单独处理：尊重服务端给的 Retry-After（秒），
+          // 没有就默认冷却 30s，避免把 OMDB 共享 key 的配额打光。
+          if (status === 429) {
+            let retryAfterHeader = "";
+            try {
+              retryAfterHeader =
+                response.getResponseHeader("Retry-After") || "";
+            } catch {
+              retryAfterHeader = "";
+            }
+            const retryAfter = Math.max(
+              30000,
+              (parseInt(retryAfterHeader, 10) || 0) * 1000,
+            );
+            console.error(
+              `Rate limited (429) ${url}: retry in ${retryAfter}ms`,
+            );
+            resolve({ text: undefined, shouldRetry: true, status, retryAfter });
+            return;
+          }
+          // 5xx 服务端错误可重试；其他 4xx 客户端错误无需重试
+          const shouldRetry = status >= 500;
           console.error(
             `Error ${url}:`,
-            response.status,
+            status,
             response.responseText,
           );
-          resolve({ text: undefined, shouldRetry });
+          resolve({ text: undefined, shouldRetry, status });
         },
         onerror: (response) => {
           // 网络层错误（DNS、超时等），值得重试
@@ -216,14 +267,26 @@
     });
   }
 
-  async function gmRequest(url, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-      const { text, shouldRetry } = await gmRequestSingle(url);
+  /**
+   * 带重试的请求：
+   * - 网络错误 / 5xx：默认最多 2 次重试，线性退避 1s/2s，避免无限打
+   * - 429（限流）：最多 2 次重试，按 Retry-After（至少 30s）退避，
+   *   不再按 1s/2s 线性——那样会把共享 key 的配额快速打光
+   * - 4xx（除 429 外）：直接放弃，重试无意义
+   */
+  async function gmRequest(url, maxRetries = 2) {
+    for (let i = 0; i <= maxRetries; i++) {
+      const { text, shouldRetry, status, retryAfter } =
+        await gmRequestSingle(url);
       if (text !== undefined) return text;
-      if (!shouldRetry) return undefined; // 4xx：不重试，直接放弃
-      if (i < retries - 1) {
-        const delay = 1000 * (i + 1);
-        console.warn(`Retry ${i + 1}/${retries} for ${url} after ${delay}ms`);
+      if (!shouldRetry) return undefined; // 4xx（除 429）：不重试，直接放弃
+
+      if (i < maxRetries) {
+        const delay = retryAfter ?? 1000 * (i + 1);
+        console.warn(
+          `Retry ${i + 1}/${maxRetries} for ${url} after ${delay}ms` +
+            (status === 429 ? " (rate limited)" : ""),
+        );
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -274,14 +337,18 @@
         return;
       }
 
+      let pending = false;
       const observer = new MutationObserver(() => {
-        const node = qs(selector);
-        if (node) {
-          observer.disconnect();
-          const idx = activeObservers.indexOf(observer);
-          if (idx !== -1) activeObservers.splice(idx, 1);
-          resolve(node);
-        }
+        if (pending) return;
+        pending = true;
+        scheduleIdle(() => {
+          pending = false;
+          const node = qs(selector);
+          if (node) {
+            finishObserver(observer);
+            resolve(node);
+          }
+        });
       });
 
       activeObservers.push(observer);
@@ -292,9 +359,7 @@
       });
 
       setTimeout(() => {
-        observer.disconnect();
-        const idx = activeObservers.indexOf(observer);
-        if (idx !== -1) activeObservers.splice(idx, 1);
+        finishObserver(observer);
         // 超时后仍尝试一次同步查询，找不到则 resolve(null)
         resolve(qs(selector) ?? null);
       }, timeout);
@@ -317,14 +382,18 @@
         return;
       }
 
+      let pending = false;
       const observer = new MutationObserver(() => {
-        const node = find();
-        if (node) {
-          observer.disconnect();
-          const idx = activeObservers.indexOf(observer);
-          if (idx !== -1) activeObservers.splice(idx, 1);
-          resolve(node);
-        }
+        if (pending) return;
+        pending = true;
+        scheduleIdle(() => {
+          pending = false;
+          const node = find();
+          if (node) {
+            finishObserver(observer);
+            resolve(node);
+          }
+        });
       });
       activeObservers.push(observer);
       observer.observe(document.documentElement, {
@@ -332,9 +401,7 @@
         subtree: true,
       });
       setTimeout(() => {
-        observer.disconnect();
-        const idx = activeObservers.indexOf(observer);
-        if (idx !== -1) activeObservers.splice(idx, 1);
+        finishObserver(observer);
         resolve(find());
       }, timeout);
     });
@@ -344,9 +411,8 @@
   function formatVoterCount(value) {
     if (value == null || value === "") return "";
     const numeric = Number(String(value).replace(/,/g, ""));
-    return Number.isFinite(numeric)
-      ? new Intl.NumberFormat("en-US").format(numeric)
-      : String(value);
+    if (!Number.isFinite(numeric) || numeric === 0) return "";
+    return new Intl.NumberFormat("en-US").format(numeric);
   }
 
   function injectTop250Style() {
@@ -506,7 +572,9 @@
         '<div class="ratings-on-weight">' +
         Array.from({ length: 10 }, (_, index) => 10 - index)
           .map((score) => {
-            const count = Number(histogram[score] || 0);
+            // 外部数据里 count 可能是 NaN/负数，统一兜底成 0，
+            // 否则 width 会算出 NaN 或负数像素。
+            const count = Math.max(0, Number(histogram[score] || 0) || 0);
             const percent = numRaters
               ? ((count * 100) / numRaters).toFixed(1)
               : "0.0";
@@ -578,18 +646,18 @@
 
     const metascore = parseInt(data.Metascore, 10);
     const color = metascore >= 60 ? "#6c3" : metascore >= 40 ? "#fc3" : "#f00";
-    const pageTitle = (qs("h1")?.textContent?.trim() || document.title)
-      .replace(/ - 豆瓣.*$/, "")
-      .replace(/（.*/, "")
-      .trim();
-    const metaUrl = data.Title
-      ? `https://www.metacritic.com/movie/${buildMetacriticSlug(data.Title)}/`
-      : `https://www.metacritic.com/search/all/${encodeURIComponent(pageTitle)}/results`;
-    const safeMetaUrl = safeUrl(metaUrl);
+    // 只用 OMDB 返回的英文片名拼 Metacritic slug。
+    // 拿不到 Title 时直接跳过——用中文页标题去搜 Metacritic 几乎必然
+    // 无结果（Metacritic 只收录英文/西方片），构造出来的链接是坏的。
+    if (!data.Title) return;
+    const metaUrl = safeUrl(
+      `https://www.metacritic.com/movie/${buildMetacriticSlug(data.Title)}/`,
+    );
+    if (!metaUrl) return;
 
     container.insertAdjacentHTML(
       "beforeend",
-      `<br>Metascore: <a href="${safeMetaUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><span style="background-color:${color};color:#fff;height:24px;width:24px;line-height:24px;text-align:center;display:inline-block;font-weight:700;border-radius:2px;vertical-align:middle">${escapeHtml(String(metascore))}</span></a>`,
+      `<br>Metascore: <a href="${metaUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><span style="background-color:${color};color:#fff;height:24px;width:24px;line-height:24px;text-align:center;display:inline-block;font-weight:700;border-radius:2px;vertical-align:middle">${escapeHtml(String(metascore))}</span></a>`,
     );
   }
 
@@ -657,7 +725,10 @@
     // 逐字符分类。必须逐字符而不是先按空格分词：
     // 豆瓣有大量条目各语言名之间没有空格（「奥本海默Oppenheimer」），
     // 按词判断会把整段当成一个汉字词，英文名就全丢了。
-    const HAN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/; // 汉字（含日文汉字）
+    // 汉字：CJK 统一表意文字 + 扩展 A + 兼容汉字区。
+    // 刻意不含扩展 B（U+20000+，约 4 万生僻字）：片名场景里几乎不会出现，
+    // 加了会让正则范围复杂化；真要支持时再扩。
+    const HAN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
     const KANA = /[\u3040-\u30ff\u31f0-\u31ff]/; // 平假名 + 片假名
     // 韩文：谚文音节、字母、兼容字母
     const HANGUL = /[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7af]/;
@@ -828,6 +899,12 @@
    * 评分区块下方的资源站搜索入口（BT4G / UIndex）。
    * 手动点击才跳转：打开条目页通常只是想看简介，没必要每次都去外部站点。
    * 每个站点一个按钮，不加标题/说明文字，避免干扰评分区块。
+   *
+   * @param {HTMLElement} container 插入点：新按钮 section 会被 appendChild 到这个节点。
+   *   幂等检查走全局（document.getElementById(SEARCH_BUTTON_ID)），因为
+   *   container 本身是每次调用新创建的空节点，在它上面查不到历史痕迹。
+   * @param {string} title
+   * @param {string} year
    */
   function renderSearchSection(container, title, year) {
     // 用全局查询判断是否已插入：container 是刚刚创建的空节点，
@@ -870,7 +947,7 @@
     const icon = (path) =>
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
       'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
-      'stroke-linejoin="round" aria-hidden="true" focusable="false" ' +
+      'stroke-linejoin="round" aria-hidden="true" ' +
       'style="display:block;flex-shrink:0">' +
       path +
       "</svg>";
@@ -1064,16 +1141,32 @@
       '[class*="AggregateRating"]',
     ];
 
-    // 文本兜底：找不到 testid 时，用 "8.3/10" 这类文本定位分数节点所在的容器
+    // 文本兜底：找不到 testid 时，用 "8.3/10" 这类文本定位分数节点所在的容器。
+    // 限定扫描到 hero 区域 + 前 200 个文本节点，避免极端页面全 body 扫死。
     const findAnchor = () => {
       const hit = selectors.map((s) => qs(s)).find(Boolean);
       if (hit) return hit;
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const root =
+        qs('[data-testid="hero"]') ||
+        qs('[data-testid="title-hero"]') ||
+        document.body;
+      const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: (node) =>
+            node.textContent && node.textContent.length < 64
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_REJECT,
+        },
+      );
+      let scanned = 0;
       let node;
       while ((node = walker.nextNode())) {
         if (/^\s*\d\.\d\s*\/\s*10\s*$/.test(node.textContent)) {
           return node.parentElement?.closest("div,span");
         }
+        if (++scanned >= 200) break;
       }
       return null;
     };
@@ -1111,33 +1204,39 @@
     try {
       let retries = 0;
       const maxRetries = 6; // 最多重插 6 次
+      let pending = false;
       const observer = new MutationObserver(() => {
-        if (document.getElementById("movie-rating-integrator-douban")) return;
-        // 评分块尚未渲染回来时不消耗重试额度，避免频繁 mutation 把额度空烧光
-        const newAnchor = findAnchor();
-        if (!newAnchor) return;
-        if (retries++ >= maxRetries) {
-          try {
-            observer.disconnect();
-            const idx = activeObservers.indexOf(observer);
-            if (idx !== -1) activeObservers.splice(idx, 1);
-          } catch {}
-          return;
-        }
-        const newBadge = buildDoubanBadge(data, ratingStr);
-        (newAnchor.parentElement || newAnchor).appendChild(newBadge);
-        console.log("[影评聚合] 重新插入豆瓣评分 (retry):", ratingStr || "暂无评分", data.url);
+        if (pending) return;
+        pending = true;
+        scheduleIdle(() => {
+          pending = false;
+          if (document.getElementById("movie-rating-integrator-douban"))
+            return;
+          // 评分块尚未渲染回来时不消耗重试额度，避免频繁 mutation 把额度空烧光
+          const newAnchor = findAnchor();
+          if (!newAnchor) return;
+          if (retries++ >= maxRetries) {
+            finishObserver(observer);
+            return;
+          }
+          const newBadge = buildDoubanBadge(data, ratingStr);
+          (newAnchor.parentElement || newAnchor).appendChild(newBadge);
+          console.log(
+            "[影评聚合] 重新插入豆瓣评分 (retry):",
+            ratingStr || "暂无评分",
+            data.url,
+          );
+        });
       });
       activeObservers.push(observer);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
 
       // 最多观察 30 秒后自动断开
       setTimeout(() => {
-        try {
-          observer.disconnect();
-          const idx = activeObservers.indexOf(observer);
-          if (idx !== -1) activeObservers.splice(idx, 1);
-        } catch {}
+        finishObserver(observer);
       }, 30000);
     } catch (e) {
       console.warn("[影评聚合] 无法创建重试 observer:", e);
@@ -1146,12 +1245,9 @@
 
   // 页面卸载时清理所有活跃的 observers，防止内存泄漏
   window.addEventListener("beforeunload", () => {
-    activeObservers.forEach((observer) => {
-      try {
-        observer.disconnect();
-      } catch {}
-    });
-    activeObservers.length = 0;
+    while (activeObservers.length) {
+      finishObserver(activeObservers[activeObservers.length - 1]);
+    }
   });
 
   function init() {
@@ -1159,7 +1255,7 @@
       handleDoubanMoviePage();
     } else if (host === "www.douban.com") {
       handleDoubanPersonPage();
-    } else if (host === "www.imdb.com") {
+    } else if (host === "www.imdb.com" || host === "imdb.com") {
       handleImdbPage();
     }
   }
