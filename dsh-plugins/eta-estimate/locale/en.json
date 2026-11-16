@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Remaining time estimate",
-    "description": "Shows exact task progress (elapsed time, step, plan) beside the composer, with a calibrated remaining-time estimate one click away."
+    "title": "ETA",
+    "description": "Shows exact task progress (elapsed time, step, plan) beside the composer, with a calibrated remaining-time estimate one click away. v2.1 adds live median step pace and open-step elapsed as model features."
   }
 }

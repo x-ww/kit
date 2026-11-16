@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Verbleibende Zeit schätzen",
-    "description": "Zeigt exakten Fortschritt (Zeit, Schritte, Plan) neben dem Composer; ein Klick wechselt zur kalibrierten Restzeitschätzung."
+    "title": "ETA",
+    "description": "Zeigt den exakten Aufgabenfortschritt (vergangene Zeit, Schritt, Plan) neben dem Composer, mit einer kalibrierten Restzeitschätzung, die per Klick erreichbar ist. v2.1 fügt das Live-Median-Tempopro und den offenen Schritt als Merkmale hinzu."
   }
 }

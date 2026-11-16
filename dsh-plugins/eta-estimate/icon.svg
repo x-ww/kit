@@ -1,8 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect x="2" y="2" width="60" height="60" rx="15" fill="#eef4ff"/>
-  <circle cx="32" cy="32" r="21" fill="none" stroke="#247bbf" stroke-width="3"/>
-  <path d="M32 18v14l9 5" fill="none" stroke="#247bbf" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="32" cy="32" r="2.6" fill="#247bbf"/>
-  <path d="M32 7v4M32 53v4M7 32h4M53 32h4" stroke="#247bbf" stroke-width="2.6" stroke-linecap="round"/>
-  <path d="M25 44h14" stroke="#247bbf" stroke-width="2.6" stroke-linecap="round" opacity="0.55"/>
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="#f6f4ee"/>
+  <!-- countdown ticks: 8 around the dial; top-right one is "remaining" in signal red -->
+  <g stroke="#2b2b2b" stroke-width="2.2" stroke-linecap="round" opacity="0.22">
+    <path d="M32 11.5v3.4"/>
+    <path d="M13.4 46.4l2.4-2.4"/>
+    <path d="M10.6 32h3.4"/>
+    <path d="M13.4 17.6l2.4 2.4"/>
+    <path d="M32 52.5v-3.4"/>
+    <path d="M50.6 46.4l-2.4-2.4"/>
+    <path d="M53.4 32h-3.4"/>
+  </g>
+  <path d="M50.6 17.6l-2.4 2.4" stroke="#d94f30" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- dial -->
+  <circle cx="32" cy="28" r="16" fill="none" stroke="#2b2b2b" stroke-width="2.8"/>
+  <!-- hands: classic ~10:10 watch pose -->
+  <path d="M32 28 L26.5 23" stroke="#2b2b2b" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M32 28 L32 16.5" stroke="#2b2b2b" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="32" cy="28" r="1.9" fill="#2b2b2b"/>
+  <!-- monogram, tucked just below the dial -->
+  <text x="32" y="53.5" font-family="ui-monospace,'SF Mono','Roboto Mono',monospace" font-size="11" font-weight="700" letter-spacing="2.2" fill="#2b2b2b" text-anchor="middle">ETA</text>
 </svg>

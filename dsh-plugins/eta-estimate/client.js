@@ -11,51 +11,87 @@ window.__ModuleLoader__.load({
     const MODE_KEY = 'eta-estimate.mode.v2';
 
     /**
-     * v2 model, fitted on this machine's own session logs.
-     *
-     * Ground truth: 98 sessions / 251 completed turns / 1757 probe points, sampled
-     * at 10..90% of each turn's WALL-CLOCK duration (not at step boundaries), so the
-     * features match what a live pill can observe at an arbitrary instant.
-     * "steps" = closed step/end events (the log's definition of a step).
-     *
-     *   log(remaining_seconds) =
-     *       coef[0] + coef[1]*log(elapsed_seconds + 1) + coef[2]*log(steps_done + 1)
-     *
-     * Bands come from residual quantiles (q10/q90 => about 80% coverage). Fitted
-     * with 5-fold cross-validation GROUPED BY SESSION (no turn from a test session
-     * is used in training). See README.md for the full comparison table.
-     *
-     * Held-out backtest, same probe protocol:
-     *   v1.2 (fixed 6.4s/step + step table) : 194% median relative error,
-     *        2.94x median bias, 40% interval coverage, 103s median absolute error
-     *   v2   (below)                       :  81% median relative error,
-     *        0.99x median bias, 77% interval coverage,  32s median absolute error
-     *
-     * Remaining time is still intrinsically heavy-tailed (turn durations span
-     * 0.3s .. 73min). No point predictor can be a reliable countdown, which is
-     * why the DEFAULT pill shows deterministic facts instead (see display modes).
-     */
+      * v2.1 model, fitted on this machine's own session logs.
+      *
+      * Ground truth: 175 sessions / 530 completed turns / 3710 probe points,
+      * sampled at 10..90% of each turn's WALL-CLOCK duration (not at step
+      * boundaries), so the features match what a live pill can observe at an
+      * arbitrary instant. "steps" = closed step/end events (the log's
+      * definition of a step).
+      *
+      *   log(remaining_seconds) =
+      *       coef[0]
+      *       + coef[1] * log(elapsed_seconds + 1)
+      *       + coef[2] * log(steps_done + 1)
+      *       + coef[3] * log(max(0.3, median_duration_of_closed_steps_this_turn_s))
+      *       + coef[4] * log(open_step_elapsed_seconds + 1)
+      *
+      * v2.1 adds two features over v2:
+      *   - median step pace for THIS turn (closed steps only, 0.3 s floor to
+      *     match the offline fit) captures how fast the agent is actually
+      *     working right now, instead of relying on a global 6.4 s/step avg.
+      *   - time already spent in the currently-open step (0 if none) captures
+      *     that a step that has been running for a long time is likely a long
+      *     step, which the elapsed-time feature alone misses when steps are
+      *     uneven.
+      *
+      * Bands come from residual quantiles (q10/q90 => about 80% coverage).
+      * Fitted with 5-fold cross-validation GROUPED BY SESSION (no turn from a
+      * test session is used in training). See README.md for the full
+      * comparison table.
+      *
+      * Held-out backtest, same probe protocol (probes at 10..90% wall-clock):
+      *   v1.2 (fixed 6.4s/step + step table) : 194% median relative error,
+      *        2.94x median bias, 40% interval coverage, 103s median abs error
+      *   v2   (elapsed + steps only)         :  81% median relative error,
+      *        0.99x median bias,  77% interval coverage,  32s median abs error
+      *   v2.1 (elapsed + steps + live pace + open step)
+      *                                          :  72% median relative error
+      *        (probe-level),  70% per-turn median-of-medians,
+      *        84% interval coverage
+      *
+      * Remaining time is still intrinsically heavy-tailed (turn durations span
+      * 0.1s .. 73min). No point predictor can be a reliable countdown, which
+      * is why the DEFAULT pill shows deterministic facts instead (see display
+      * modes).
+      */
     const MODEL = {
-      coef: [0.281552, 1.000945, -0.269862],
-      q10: -1.727042,
-      q50: -0.022416,
-      q90: 1.780031,
-      sampleTurns: 251,
-      sampleProbes: 1757,
-      /* Empirical total-duration distribution, seconds, at percentilePoints. */
+      /* v2.1 coefficients, target = log(remaining_seconds), features in the
+       * order [1, log(elapsed+1), log(steps+1), log(max(0.3,medStepSec)),
+       * log(openStepSec+1)]. */
+      coef: [0.671179, 1.16403, -0.483348, -0.301716, -0.037698],
+      q10: -1.776758,
+      q50: 0.043074,
+      q90: 1.685939,
+      sampleTurns: 530,
+      sampleProbes: 3710,
+      /* Empirical total-duration distribution, seconds, at percentilePoints.
+       * Refit on the 175-session dataset (Nov 2025). */
       percentilePoints: [0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 1],
-      durationPercentiles: [0.3, 1.1, 5.3, 21.1, 37.2, 60.6, 90.8, 178.8, 306.3, 422.2, 733.2, 1229.6, 4399.4],
+      durationPercentiles: [0.1, 1.5, 7.2, 18.1, 33.7, 57.9, 91.0, 164.6, 287.1, 448.7, 749.9, 1109.8, 4399.4],
     };
 
     function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-    /** Calibrated 80% band for remaining seconds, from elapsed seconds + closed steps. */
-    function estimateRemaining(elapsedSec, stepsDone) {
+    /** Calibrated 80% band for remaining seconds.
+      *
+      * @param {number} elapsedSec  - wall-clock seconds since the turn started
+      * @param {number} stepsDone   - number of closed steps in this turn
+      * @param {number} medStepSec  - median duration (s) of the closed steps in
+      *                               this turn; 0 if fewer than one closed step
+      * @param {number} openStepSec - seconds already spent in the currently-open
+      *                               step; 0 if no step is open
+      */
+    function estimateRemaining(elapsedSec, stepsDone, medStepSec, openStepSec) {
       const el = Math.max(0, elapsedSec);
       const k = Math.max(0, Math.floor(stepsDone) || 0);
+      const med = Math.max(0.3, medStepSec || 0); // 0.3 s floor matches the offline fit
+      const osp = Math.max(0, openStepSec || 0);
       const f = MODEL.coef[0]
         + MODEL.coef[1] * Math.log(el + 1)
-        + MODEL.coef[2] * Math.log(k + 1);
+        + MODEL.coef[2] * Math.log(k + 1)
+        + MODEL.coef[3] * Math.log(med)
+        + MODEL.coef[4] * Math.log(osp + 1);
       return {
         low: clamp(Math.exp(f + MODEL.q10), 0.5, 10800),
         mid: clamp(Math.exp(f + MODEL.q50), 0.5, 10800),
@@ -395,24 +431,59 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** Count closed steps of a turn from the live timeline (step/end equivalent). */
-    function closedSteps(timeline, turn) {
-      if (!timeline || !timeline.turns || typeof timeline.turns.get !== 'function') return null;
+    /** Read the live step list of a turn from the timeline.
+      *
+      * Returns { count, durations, openElapsed }:
+      *   count      – number of closed steps (step/end equivalent)
+      *   durations  – array of per-step wall-clock durations in seconds for the
+      *                 closed steps (used to compute the live median pace)
+      *   openElapsed– seconds already spent in the currently-open step, or 0
+      *
+      * `now` is Date.now() in milliseconds.
+      */
+    function stepTimings(timeline, turn, now) {
+      if (!timeline || !timeline.turns || typeof timeline.turns.get !== 'function') {
+        return { count: null, durations: null, openElapsed: 0 };
+      }
       let record = null;
-      try { record = timeline.turns.get(turn); } catch (error) { return null; }
+      try { record = timeline.turns.get(turn); } catch (error) { return { count: null, durations: null, openElapsed: 0 }; }
       const steps = record && record.steps;
-      if (!steps) return null;
-      let n = 0;
-      const visit = function (s) {
-        if (!s) return;
-        if (s.status === 'closed' || (s.end && typeof s.end.time === 'number')) n += 1;
-      };
-      try {
-        if (Array.isArray(steps)) { for (let i = 0; i < steps.length; i += 1) visit(steps[i]); }
-        else if (typeof steps.forEach === 'function') { steps.forEach(function (s) { visit(s); }); }
-        else return null;
-      } catch (error) { return null; }
-      return n;
+      if (!steps) return { count: null, durations: null, openElapsed: 0 };
+
+      const list = Array.isArray(steps)
+        ? steps
+        : (typeof steps.forEach === 'function' ? Array.from(steps) : null);
+      if (!list) return { count: null, durations: null, openElapsed: 0 };
+
+      let count = 0;
+      const durations = [];
+      let openElapsed = 0;
+
+      for (let i = 0; i < list.length; i += 1) {
+        const s = list[i];
+        if (!s) continue;
+        const closed = s.status === 'closed' || (s.end && typeof s.end.time === 'number');
+        if (closed) {
+          count += 1;
+          if (s.start && s.end && typeof s.start.time === 'number' && typeof s.end.time === 'number') {
+            const dur = (s.end.time - s.start.time) / 1000;
+            // ignore steps with implausibly long durations (suspended/cancelled)
+            if (dur > 0 && dur < 600) durations.push(dur);
+          }
+        } else if (s.start && typeof s.start.time === 'number') {
+          // open step: time since it started
+          openElapsed = Math.max(0, (now - s.start.time) / 1000);
+        }
+      }
+      return { count: count, durations: durations, openElapsed: openElapsed };
+    }
+
+    /** Median of a numeric array; returns null for an empty array. */
+    function median(arr) {
+      if (!arr || arr.length === 0) return null;
+      const s = arr.slice().sort(function (a, b) { return a - b; });
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
     }
 
     /** Deterministic plan progress, when the agent published a todo list. */
@@ -484,7 +555,8 @@ window.__ModuleLoader__.load({
         if (!openTurn) return null;
 
         /* Exact count of step/end events so the model's x-axis matches the log. */
-        let stepsDone = closedSteps(timeline, openTurn.turn);
+        const st = stepTimings(timeline, openTurn.turn, now);
+        let stepsDone = st.count;
         if (stepsDone === null && partial && partial.turn === openTurn.turn && typeof partial.step === 'number') {
           stepsDone = Math.max(0, partial.step - 1);
         }
@@ -501,8 +573,10 @@ window.__ModuleLoader__.load({
 
         const elapsedMs = Math.max(0, now - openTurn.startTime);
         const elapsedSec = elapsedMs / 1000;
+        const medStepSec = median(st.durations);
+        const openStepSec = st.openElapsed;
         const plan = planInfo(todos);
-        const est = estimateRemaining(elapsedSec, stepsDone);
+        const est = estimateRemaining(elapsedSec, stepsDone, medStepSec, openStepSec);
         const pct = elapsedPercentile(elapsedSec);
         const elapsedText = formatElapsed(elapsedSec, t);
         const nextMode = mode === 'progress' ? t('eta.mode.estimate') : t('eta.mode.progress');

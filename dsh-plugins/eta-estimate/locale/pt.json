@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Estimativa de tempo restante",
-    "description": "Mostra o progresso exato (tempo, passos, plano) junto ao compositor; um clique alterna para a estimativa calibrada."
+    "title": "ETA",
+    "description": "Mostra o progresso exato da tarefa (tempo decorrido, passo, plano) ao lado do compositor, com uma estimativa de tempo restante calibrada, a um clique. v2.1 adiciona o ritmo mediano em tempo real e o passo aberto como características."
   }
 }
