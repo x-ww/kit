@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "ETA",
-    "description": "Muestra el progreso exacto de la tarea (tiempo transcurrido, paso, plan) junto al compositor, con una estimación de tiempo restante calibrada a un clic. v2.1 añade el ritmo de paso mediano en vivo y el paso abierto como características."
+    "description": "Tiempo transcurrido, pasos y progreso de la tarea junto al compositor; haz clic para la estimación de tiempo restante."
   }
 }

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "ETA",
-    "description": "Affiche la progression exacte de la tâche (temps écoulé, étape, plan) à côté du composeur, avec une estimation du temps restant calibrée, accessible en un clic. v2.1 ajoute le rythme médian en direct et l’étape ouverte comme caractéristiques."
+    "description": "Temps écoulé, étapes et progression de la tâche à côté du composeur ; cliquez pour l’estimation du temps restant."
   }
 }
