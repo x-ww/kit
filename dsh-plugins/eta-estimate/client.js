@@ -100,14 +100,12 @@ window.__ModuleLoader__.load({
     }
 
 
-    /** Coarse units: a second-accurate number here would be false precision. */
-    function formatCoarse(sec, t) {
-      if (sec < 30) return t('eta.under1m');
-      if (sec < 60) return t('eta.sec', { n: String(Math.max(5, Math.round(sec / 5) * 5)) });
+    /** Compact time: 45s → "45s", 95s → "2m", 650s → "11m". */
+    function formatCompact(sec) {
+      if (sec < 60) return String(Math.max(1, Math.round(sec))) + 's';
       const mins = sec / 60;
-      if (mins < 2) return t('eta.min', { n: '1–2' });
-      if (mins < 10) return t('eta.min', { n: String(Math.round(mins)) });
-      return t('eta.min', { n: String(Math.round(mins / 5) * 5) });
+      if (mins < 10) return String(Math.round(mins)) + 'm';
+      return String(Math.round(mins / 5) * 5) + 'm';
     }
 
     function formatElapsed(sec, t) {
@@ -117,105 +115,81 @@ window.__ModuleLoader__.load({
 
     const DICTS = {
       en: {
-        'eta.range': '≈ {low}–{high} left',
-        'eta.about': '≈ {v} left',
         'eta.soon': 'Almost done',
         'eta.plan': 'Task {done}/{total} · {elapsed} elapsed',
         'eta.facts': '{elapsed} elapsed · step {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n}m',
-        'eta.under1m': 'under a minute',
         'eta.mode.progress': 'facts only',
         'eta.mode.estimate': 'time estimate',
         'eta.tip.toggle': 'Click to switch to {next}'
       },
       zh: {
-        'eta.range': '预计剩余 ≈ {low}–{high}',
-        'eta.about': '预计剩余 ≈ {v}',
         'eta.soon': '预计即将完成',
         'eta.plan': '任务 {done}/{total} · 已用时 {elapsed}',
         'eta.facts': '已用时 {elapsed} · 第 {step} 步',
         'eta.sec': '{n} 秒',
         'eta.min': '{n} 分钟',
-        'eta.under1m': '不到 1 分钟',
         'eta.mode.progress': '仅看进度',
         'eta.mode.estimate': '时间预估',
         'eta.tip.toggle': '点击切换为「{next}」'
       },
       ja: {
-        'eta.range': '残り ≈ {low}–{high}',
-        'eta.about': '残り ≈ {v}',
         'eta.soon': 'まもなく完了',
         'eta.plan': 'タスク {done}/{total} · 経過 {elapsed}',
         'eta.facts': '経過 {elapsed} · ステップ {step}',
         'eta.sec': '{n}秒',
         'eta.min': '{n}分',
-        'eta.under1m': '1分未満',
         'eta.mode.progress': '進捗のみ',
         'eta.mode.estimate': '残り時間',
         'eta.tip.toggle': 'クリックで「{next}」に切替'
       },
       es: {
-        'eta.range': '≈ {low}–{high} restantes',
-        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Casi listo',
         'eta.plan': 'Tarea {done}/{total} · {elapsed} transcurridos',
         'eta.facts': '{elapsed} transcurridos · paso {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
-        'eta.under1m': 'menos de un minuto',
         'eta.mode.progress': 'solo progreso',
         'eta.mode.estimate': 'estimación de tiempo',
         'eta.tip.toggle': 'Haz clic para cambiar a «{next}»'
       },
       fr: {
-        'eta.range': '≈ {low}–{high} restantes',
-        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Presque terminé',
         'eta.plan': 'Tâche {done}/{total} · {elapsed} écoulées',
         'eta.facts': '{elapsed} écoulées · étape {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
-        'eta.under1m': 'moins d’une minute',
         'eta.mode.progress': 'progression seule',
         'eta.mode.estimate': 'estimation du temps',
         'eta.tip.toggle': 'Cliquez pour passer à « {next} »'
       },
       de: {
-        'eta.range': '≈ {low}–{high} verbleibend',
-        'eta.about': '≈ {v} verbleibend',
         'eta.soon': 'Fast fertig',
         'eta.plan': 'Aufgabe {done}/{total} · {elapsed} vergangen',
         'eta.facts': '{elapsed} vergangen · Schritt {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} Min.',
-        'eta.under1m': 'unter einer Minute',
         'eta.mode.progress': 'nur Fortschritt',
         'eta.mode.estimate': 'Zeitschätzung',
         'eta.tip.toggle': 'Klicken, um zu „{next}“ zu wechseln'
       },
       ru: {
-        'eta.range': '≈ {low}–{high} осталось',
-        'eta.about': '≈ {v} осталось',
         'eta.soon': 'Почти готово',
         'eta.plan': 'Задача {done}/{total} · прошло {elapsed}',
         'eta.facts': 'Прошло {elapsed} · шаг {step}',
         'eta.sec': '{n}с',
         'eta.min': '{n} мин',
-        'eta.under1m': 'меньше минуты',
         'eta.mode.progress': 'только прогресс',
         'eta.mode.estimate': 'оценка времени',
         'eta.tip.toggle': 'Нажмите, чтобы переключить на «{next}»'
       },
       pt: {
-        'eta.range': '≈ {low}–{high} restantes',
-        'eta.about': '≈ {v} restantes',
         'eta.soon': 'Quase concluído',
         'eta.plan': 'Tarefa {done}/{total} · {elapsed} decorridos',
         'eta.facts': '{elapsed} decorridos · passo {step}',
         'eta.sec': '{n}s',
         'eta.min': '{n} min',
-        'eta.under1m': 'menos de um minuto',
         'eta.mode.progress': 'apenas progresso',
         'eta.mode.estimate': 'estimativa de tempo',
         'eta.tip.toggle': 'Clique para mudar para «{next}»'
@@ -528,14 +502,14 @@ window.__ModuleLoader__.load({
           label = t('eta.facts', { elapsed: elapsedText, step: String(stepsDone) });
           tooltip = t('eta.tip.toggle', { next: nextMode });
         } else {
-          const lowText = formatCoarse(est.low, t);
-          const highText = formatCoarse(est.high, t);
+          const lowC = formatCompact(est.low);
+          const highC = formatCompact(est.high);
           if (est.mid < 15) {
             label = t('eta.soon');
-          } else if (lowText === highText) {
-            label = t('eta.about', { v: lowText });
+          } else if (lowC === highC) {
+            label = '≈ ' + lowC;
           } else {
-            label = t('eta.range', { low: lowText, high: highText });
+            label = '≈ ' + lowC + '–' + highC;
           }
           tooltip = t('eta.tip.toggle', { next: nextMode });
         }
