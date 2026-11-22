@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#faf8f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131212" media="(prefers-color-scheme: dark)">
+<meta name="description" content="A tiny page that shows a random cat photo. Tap or click for another.">
+<title>Random Cat</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E%F0%9F%90%B1%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.thecatapi.com" crossorigin>
+<link rel="preconnect" href="https://cdn2.thecatapi.com" crossorigin>
+<style>
+  :root {
+    color-scheme: light dark;
+
+    --bg-light: #faf8f5;
+    --bg-dark: #131212;
+    --fg-light: #1b1a19;
+    --fg-dark: #f1ede9;
+    --muted-light: #5c5854;
+    --muted-dark: #a9a29b;
+    --shadow-light: rgb(0 0 0 / 0.16);
+    --shadow-dark: rgb(0 0 0 / 0.6);
+
+    --bg: light-dark(var(--bg-light), var(--bg-dark));
+    --fg: light-dark(var(--fg-light), var(--fg-dark));
+    --muted: light-dark(var(--muted-light), var(--muted-dark));
+    --shadow: light-dark(var(--shadow-light), var(--shadow-dark));
+  }
+
+  /* Fallback for browsers without light-dark() */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: var(--bg-dark);
+      --fg: var(--fg-dark);
+      --muted: var(--muted-dark);
+      --shadow: var(--shadow-dark);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; }
+
+  body {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding:
+      max(20px, env(safe-area-inset-top))
+      max(20px, env(safe-area-inset-right))
+      max(20px, env(safe-area-inset-bottom))
+      max(20px, env(safe-area-inset-left));
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage { display: flex; justify-content: center; width: 100%; }
+
+  .viewer {
+    all: unset;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    cursor: pointer;
+    border-radius: 16px;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .viewer:focus-visible {
+    outline: 3px solid var(--fg);
+    outline-offset: 8px;
+  }
+
+  /* The frame adopts the loaded photo's aspect ratio so the image fills it
+     with no letterboxing, while reserving space during loading (no CLS). */
+  .frame {
+    --ar: 1.5;
+    position: relative;
+    width: min(90vw, 960px, calc(80dvh * var(--ar)));
+    aspect-ratio: var(--ar);
+    max-height: 80dvh;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 10px 28px var(--shadow);
+    display: grid;
+    place-items: center;
+  }
+
+  .photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    will-change: opacity;
+  }
+
+  .photo.is-active { opacity: 1; }
+
+  .hint {
+    color: var(--muted);
+    font-size: clamp(0.875rem, 0.8rem + 0.3vw, 1rem);
+    letter-spacing: 0.01em;
+  }
+
+  /* Indeterminate loading spinner built on the native <progress> element */
+  .spinner {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    appearance: none;
+    -webkit-appearance: none;
+    background: conic-gradient(from 90deg, var(--fg) 0deg 90deg, transparent 90deg 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+    animation: spin 1s linear infinite;
+    transition: opacity 0.3s ease;
+  }
+
+  /* Hide the native progress bar */
+  .spinner:indeterminate::-webkit-progress-bar,
+  .spinner:indeterminate::-webkit-progress-value,
+  .spinner:indeterminate::-moz-progress-bar {
+    display: none;
+    background: none;
+  }
+
+  .spinner[hidden] { display: none; }
+
+  @keyframes spin { to { rotate: 1turn; } }
+
+  .frame-error {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    padding: 0 1rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  .visually-hidden:where(:not(:focus-within, :active)) {
+    position: absolute !important;
+    clip-path: inset(50%) !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation-duration: 4s; }
+  }
+</style>
+</head>
+<body>
+<main class="stage">
+  <h1 class="visually-hidden">Random cat</h1>
+  <button class="viewer" id="shuffle" type="button" aria-label="Show another cat">
+    <span class="frame">
+      <img class="photo" id="photoA" alt="" decoding="async" fetchpriority="high">
+      <img class="photo" id="photoB" alt="" decoding="async" fetchpriority="low" aria-hidden="true">
+      <progress class="spinner" aria-label="Loading a cat"></progress>
+      <span class="frame-error" id="frameError" hidden>Couldn’t load a cat</span>
+    </span>
+    <span class="hint" id="hint">Tap for another cat</span>
+  </button>
+  <p class="visually-hidden" role="status" id="status"></p>
+</main>
+<script>
+  const API = "https://api.thecatapi.com/v1/images/search?size=med&mime_types=jpg,png";
+  const photos = [document.getElementById("photoA"), document.getElementById("photoB")];
+  const frame = document.querySelector(".frame");
+  const spinner = document.querySelector(".spinner");
+  const frameError = document.getElementById("frameError");
+  const status = document.getElementById("status");
+  const hint = document.getElementById("hint");
+  const DEFAULT_HINT = hint.textContent;
+
+  // Start with photoB "current" so the first image loads into photoA,
+  // which carries fetchpriority="high" as the initial LCP candidate.
+  let active = 1;
+  let busy = false;
+  let prefetched = null;
+
+  function getCat() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    return fetch(API, { signal: controller.signal, headers: { Accept: "application/json" } })
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((list) => {
+        if (!Array.isArray(list) || !list[0] || !list[0].url) throw new Error("Bad response");
+        return list[0];
+      })
+      .finally(() => clearTimeout(timer));
+  }
+
+  function preload(data) {
+    const img = new Image();
+    img.src = data.url;
+    return img.decode().catch(() => {}).then(() => img);
+  }
+
+  function prefetch() {
+    prefetched = getCat()
+      .then((data) => preload(data).then(() => data))
+      .catch(() => null);
+  }
+
+  function setBusy(value) {
+    busy = value;
+    spinner.hidden = !value;
+  }
+
+  async function show(data) {
+    const next = photos[1 - active];
+    next.width = data.width || 1200;
+    next.height = data.height || 800;
+    next.src = data.url;
+    try { await next.decode(); } catch (_) {}
+    // Size the frame to the photo's aspect ratio (default 3:2 if unknown).
+    const ratio = data.width && data.height ? data.width / data.height : 1.5;
+    frame.style.setProperty("--ar", String(ratio));
+    next.classList.add("is-active");
+    photos[active].classList.remove("is-active");
+    active = 1 - active;
+    hint.textContent = DEFAULT_HINT;
+    frameError.hidden = true;
+  }
+
+  async function advance() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      let data = prefetched ? await prefetched : null;
+      prefetched = null;
+      if (!data || !data.url) data = await getCat();
+      await show(data);
+      prefetch();
+    } catch (_) {
+      hint.textContent = "Tap to retry";
+      frameError.hidden = false;
+      status.textContent = "Could not load a cat. Tap to try again.";
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  document.getElementById("shuffle").addEventListener("click", advance);
+  advance();
+</script>
+</body>
+</html>

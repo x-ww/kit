@@ -1,0 +1,12 @@
+{
+  // Cloudflare Worker (static assets only) serving the random cat page.
+  // account_id is intentionally omitted from this public repo; wrangler
+  // uses the account you are logged in with.
+  "name": "nameless-math-d487",
+  "compatibility_date": "2026-09-18",
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  }
+}
