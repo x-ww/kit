@@ -1,8 +1,6 @@
 // ==UserScript==
 // @name         影评聚合
-// @namespace    https://github.com/x-ww/kit
 // @version      1.9.0
-// @description  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
 // @match        *://movie.douban.com/subject/*
 // @match        *://www.douban.com/personage/*
 // @match        *://*.imdb.com/title/*
@@ -15,8 +13,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @downloadURL  https://github.com/x-ww/kit/raw/main/ratings.js
-// @noframes
-// @run-at       document-end
 // ==/UserScript==
 "use strict";
 
@@ -36,7 +32,6 @@
     "15c0aa3f",
   ];
   const STYLE_ID = "movie-rating-integrator-style";
-  const DOUBAN_RECOVERED_TITLE = "Rating recovered by script.";
   const host = location.hostname;
 
   const SEARCH_BUTTON_ID = "movie-rating-integrator-search";
@@ -415,12 +410,6 @@
     .mri-tomato-icon { font-size: 14px; vertical-align: middle; margin: 0 2px; }
     #interest_sectl .rating_sum,
     #movie-rating-integrator-extra .rating_sum { clear: both; }
-    .mri-histogram .stars { display: inline-block; width: 18px; text-align: center; }
-    .mri-histogram .power {
-      display: inline-block; width: var(--mri-bar); height: 12px;
-      background: #f2b134; vertical-align: middle;
-    }
-    .mri-histogram .rating_per { margin-inline-start: 4px; }
   `;
 
   function ensureStyles() {
@@ -482,8 +471,6 @@
     if (resource) {
       if (resource.rating) data.imdbRating = resource.rating;
       if (resource.ratingCount) data.imdbVotes = resource.ratingCount;
-      if (resource.ratingsHistograms?.["IMDb Users"])
-        data.histogram = resource.ratingsHistograms["IMDb Users"].histogram;
       if (resource.topRank) data.topRank = resource.topRank;
     }
 
@@ -666,41 +653,13 @@
     };
   }
 
-  function insertDoubanRating(
-    parent,
-    title,
-    rating,
-    link,
-    numRaters,
-    histogram,
-  ) {
+  function insertDoubanRating(parent, title, rating, link, numRaters) {
     const numericRating = Number(rating);
     const star = (5 * Math.round(numericRating)).toString().padStart(2, "0");
     const displayRating = Number.isFinite(numericRating)
       ? numericRating.toFixed(1)
       : rating;
     const safeLink = safeUrl(link);
-    let histogramHtml = "";
-
-    if (histogram && numRaters) {
-      const histogramValues = Object.values(histogram);
-      const max = Math.max(...histogramValues, 0);
-
-      histogramHtml =
-        '<div class="ratings-on-weight mri-histogram">' +
-        Array.from({ length: 10 }, (_, index) => 10 - index)
-          .map((score) => {
-            const count = Math.max(0, Number(histogram[score] || 0) || 0);
-            const percent = numRaters
-              ? ((count * 100) / numRaters).toFixed(1)
-              : "0.0";
-            const width = max ? (64 / max) * count : 0;
-            return `<div class="item"><span class="stars${score} starstop">${score}</span><div class="power" style="--mri-bar:${width}px"></div><span class="rating_per">${percent}%</span></div>`;
-          })
-          .join("") +
-        "</div>";
-    }
-
     parent.insertAdjacentHTML(
       "beforeend",
       `
@@ -713,7 +672,7 @@
                         <a href="${safeLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(formatVoterCount(numRaters))}人评价</a>
                     </div>
                 </div>
-            </div>${histogramHtml}`,
+            </div>`,
     );
   }
 
@@ -889,7 +848,6 @@
         .join(""),
     );
 
-    const hasKana = segments.some((s) => s.kind === "kana");
     const hasHangul = segments.some((s) => s.kind === "hangul");
 
     if (latin) return latin;
@@ -999,7 +957,6 @@
           data.rating.numRaters,
         );
       }
-      wrap.title = DOUBAN_RECOVERED_TITLE;
     });
 
     if (qs("#movie-rating-iframe")) section.classList.add("mri-pushed");
@@ -1064,7 +1021,6 @@
           data.imdbRating,
           `https://www.imdb.com/title/${imdbId}/ratings`,
           data.imdbVotes,
-          data.histogram,
         );
 
         if (!isNA(data.topRank) && data.topRank <= 250 && !qs(".mri-top250")) {
@@ -1072,7 +1028,7 @@
             document.getElementById("dale_movie_subject_top_icon") || qs("h1")
           )?.insertAdjacentHTML(
             "beforebegin",
-            `<div class="mri-top250"><span class="mri-top250-no">No.${data.topRank}</span><span class="mri-top250-link"><a href="https://www.imdb.com/chart/top">IMDb Top 250</a></span></div>`,
+            `<div class="mri-top250"><span class="mri-top250-no">No.${data.topRank}</span><a href="https://www.imdb.com/chart/top">IMDb Top 250</a></div>`,
           );
         }
       }
