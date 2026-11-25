@@ -1,17 +1,11 @@
 // ==UserScript==
 // @name         影评聚合
-// @name:en      Movie Ratings
-// @name:zh-CN   影评聚合
 // @namespace    https://github.com/x-ww/kit
 // @version      1.9.0
 // @description  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
-// @description:en  Movie ratings aggregator for Douban/IMDb
-// @description:zh-CN  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
-// @author       x-ww
 // @match        *://movie.douban.com/subject/*
 // @match        *://www.douban.com/personage/*
-// @match        *://www.imdb.com/title/*
-// @match        *://imdb.com/title/*
+// @match        *://*.imdb.com/title/*
 // @connect      movie.douban.com
 // @connect      www.douban.com
 // @connect      www.omdbapi.com
@@ -20,9 +14,6 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @homepageURL  https://github.com/x-ww/kit
-// @supportURL   https://github.com/x-ww/kit/issues
-// @updateURL    https://github.com/x-ww/kit/raw/main/ratings.js
 // @downloadURL  https://github.com/x-ww/kit/raw/main/ratings.js
 // @noframes
 // @run-at       document-end
