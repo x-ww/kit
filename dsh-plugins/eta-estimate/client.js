@@ -394,7 +394,7 @@ window.__ModuleLoader__.load({
     /** Median of a numeric array; returns null for an empty array. */
     function median(arr) {
       if (!arr || arr.length === 0) return null;
-      const s = arr.slice().sort(function (a, b) { return a - b; });
+      const s = arr.toSorted(function (a, b) { return a - b; });
       const mid = Math.floor(s.length / 2);
       return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
     }

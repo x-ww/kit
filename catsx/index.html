@@ -202,9 +202,10 @@
   let prefetched = null;
 
   function getCat() {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    return fetch(API, { signal: controller.signal, headers: { Accept: "application/json" } })
+    return fetch(API, {
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: "application/json" },
+    })
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
@@ -212,8 +213,7 @@
       .then((list) => {
         if (!Array.isArray(list) || !list[0] || !list[0].url) throw new Error("Bad response");
         return list[0];
-      })
-      .finally(() => clearTimeout(timer));
+      });
   }
 
   function preload(data) {
