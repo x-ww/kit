@@ -3,7 +3,7 @@
 // @name:en      Movie Ratings
 // @name:zh-CN   影评聚合
 // @namespace    https://github.com/x-ww/kit
-// @version      1.8.0
+// @version      1.9.0
 // @description  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
 // @description:en  Movie ratings aggregator for Douban/IMDb
 // @description:zh-CN  豆瓣/IMDb 多平台评分聚合，附 BT4G 搜索
@@ -13,6 +13,7 @@
 // @match        *://www.imdb.com/title/*
 // @match        *://imdb.com/title/*
 // @connect      movie.douban.com
+// @connect      www.douban.com
 // @connect      www.omdbapi.com
 // @connect      p.media-imdb.com
 // @grant        GM.xmlHttpRequest
@@ -43,25 +44,11 @@
     "d58193b6",
     "15c0aa3f",
   ];
-  const IMDB_TOP_STYLE_ID = "movie-rating-integrator-top250-style";
+  const STYLE_ID = "movie-rating-integrator-style";
   const DOUBAN_RECOVERED_TITLE = "Rating recovered by script.";
   const host = location.hostname;
 
-  // ─── 资源站搜索入口 ───
-  // 点击后才跳转，脚本本身不请求 bt4g / uindex（bt4g 的搜索接口有 IP 级
-  // 限流，超限返回 429 并封禁 10 分钟；uindex 有 Cloudflare 挑战）。
-  // 因此无需为它们添加 @connect，全部搜索与筛选都在目标站内完成。
-  // 站点选择走一个可配置列表：某个镜像挂了或需要换域名，只改这里。
   const SEARCH_BUTTON_ID = "movie-rating-integrator-search";
-  // 只拼搜索词，不替用户预设任何筛选条件——分类、排序、分辨率都由用户
-  // 在站点内自己选。想恢复「只搜影视 + 按做种数排序」，把下面被注释掉的
-  // params.set 取消注释即可（bt4g 的参数是 category / orderby，
-  // uindex 的分类参数是 c，c=1 为电影）。
-  // 按钮图标用内联 SVG 而不是 emoji：emoji 的字形由系统字体决定，
-  // 🎬 是实心彩色块、🔎 是细线放大镜，两者在同样字号下视觉重量差很多，
-  // 并排时看起来一个"大"一个"小"，且无法用 CSS 修正（盒子尺寸是一样的，
-  // 差的是字形本身的墨量）。换成同一套 24×24 线性图标、同样 14px 尺寸、
-  // 同样 stroke-width，两个按钮的图标才真正一致。
   const ICON_SVG = {
     download:
       '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/>',
@@ -77,8 +64,6 @@
       buildUrl: (title, year) => {
         const params = new URLSearchParams();
         params.set("q", buildSearchQuery(title, year));
-        // params.set("category", "movie");
-        // params.set("orderby", "seeders");
         return `https://bt4gprx.com/search?${params.toString()}`;
       },
     },
@@ -87,18 +72,14 @@
       label: "UIndex",
       icon: ICON_SVG.search,
       color: "#0969da",
-      // 用站点搜索框自己的参数名 search（<form id="searchform" action="/search.php">），
-      // 不带分类参数时搜全站。
       buildUrl: (title, year) => {
         const params = new URLSearchParams();
         params.set("search", buildSearchQuery(title, year));
-        // params.set("c", "1"); // 1=Movies 2=TV 3=Games 4=Music 5=Apps 6=XXX 7=Anime 8=Other
         return `https://uindex.org/search.php?${params.toString()}`;
       },
     },
   ];
 
-  // 原脚本这里是 base64 编码的图标，文件被截断后已损坏，改用 emoji 代替
   const TOMATO_ICON_FRESH = "🍅";
   const TOMATO_ICON_ROTTEN = "🟢";
   const TOMATO_USER_ICON_POSITIVE = "🍿";
@@ -110,13 +91,13 @@
     ...root.querySelectorAll(selector),
   ];
 
-  // ─── 缓存配置（使用 GM_setValue/GM_getValue，跨域统一存储）───
   const CACHE_KEY = "movie-rating-integrator-cache";
-  const CACHE_TTL = 24 * 60 * 60 * 1000; // 24小时
-  // 豆瓣「暂无评分 / 搜索无结果」的响应可能很快变化（新片出分、收录），只缓存 1 小时
+  const CACHE_TTL = 24 * 60 * 60 * 1000;
   const PENDING_CACHE_TTL = 60 * 60 * 1000;
+  const EMPTY_CACHE_TTL = 5 * 60 * 1000;
+  const NO_MATCH_TTL = 10 * 60 * 1000;
   const CACHE_MAX_SIZE = 100;
-  const CACHE_EVICT_COUNT = 10; // 超出上限时批量淘汰最旧的条数
+  const CACHE_EVICT_COUNT = 10;
 
   function getCached(key) {
     try {
@@ -126,8 +107,6 @@
         return entry.data;
       }
     } catch (error) {
-      // 存储失败（被禁用/损坏/满）时缓存层整体失效，每次都会打网络，
-      // 打一行 warn 方便用户排查，而不是静默退化。
       console.warn("[影评聚合] 读取缓存失败，本次请求将不命中缓存:", error);
     }
     return null;
@@ -140,7 +119,6 @@
 
       const keys = Object.keys(cache);
       if (keys.length > CACHE_MAX_SIZE) {
-        // 批量淘汰最旧的 CACHE_EVICT_COUNT 条，避免每次写入都只删一条
         keys
           .sort((a, b) => cache[a].timestamp - cache[b].timestamp)
           .slice(0, CACHE_EVICT_COUNT)
@@ -154,13 +132,11 @@
   }
 
   function resolveCacheTtl(result) {
-    const isEmptySearch = Array.isArray(result) && result.length === 0;
+    if (Array.isArray(result) && result.length === 0) return EMPTY_CACHE_TTL;
     const isUnrated = result?.subject && !result.subject.rate;
-    return isEmptySearch || isUnrated ? PENDING_CACHE_TTL : CACHE_TTL;
+    return isUnrated ? PENDING_CACHE_TTL : CACHE_TTL;
   }
 
-  // 转义 HTML 文本上下文里的特殊字符。
-  // 只覆盖文本/属性赋值；URL 类字段请配合 safeUrl 使用，不要在这里拼链接。
   function escapeHtml(value) {
     if (value == null) return "";
     return String(value)
@@ -169,8 +145,6 @@
       .replace(/>/g, "&gt;")
       .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#39;")
-      // 换行/回车在属性值里会被折叠成空格，在文本节点里仍会被渲染成
-      // 新行；统一转成实体，避免外部数据里的换行破坏内联样式或 title。
       .replace(/\n/g, "&#10;")
       .replace(/\r/g, "&#13;");
   }
@@ -185,18 +159,12 @@
     }
   }
 
-  // 用于存储活跃的 observer，以便页面卸载时清理
   const activeObservers = [];
-  // MutationObserver 回调去抖：用 requestIdleCallback（现代浏览器把回调排到
-  // 空闲帧，避免 React 连续重渲染时每次 mutation 都跑一遍 find）；
-  // 老浏览器退化成 setTimeout(0)。
   const scheduleIdle =
     typeof window !== "undefined" && window.requestIdleCallback
       ? window.requestIdleCallback.bind(window)
       : (fn) => setTimeout(fn, 0);
 
-  // 把重复的「断开 observer + 从 activeObservers 里移除」收敛成一处，
-  // 避免各处 catch {} 吞掉异常导致 observer 泄漏。
   function finishObserver(observer) {
     try {
       observer.disconnect();
@@ -205,13 +173,6 @@
     if (idx !== -1) activeObservers.splice(idx, 1);
   }
 
-  // ─── 网络请求 ───
-
-  /**
-   * 单次请求，返回 { text, shouldRetry, status, retryAfter }
-   * - 网络错误 / 5xx / 429：shouldRetry = true（429 带上 retryAfter 毫秒数）
-   * - 其他 4xx 客户端错误：shouldRetry = false（重试无意义）
-   */
   function gmRequestSingle(url) {
     return new Promise((resolve) => {
       if (!GM_REQUEST) {
@@ -229,8 +190,6 @@
             return;
           }
           const status = response.status;
-          // 429（限流）单独处理：尊重服务端给的 Retry-After（秒），
-          // 没有就默认冷却 30s，避免把 OMDB 共享 key 的配额打光。
           if (status === 429) {
             let retryAfterHeader = "";
             try {
@@ -249,7 +208,6 @@
             resolve({ text: undefined, shouldRetry: true, status, retryAfter });
             return;
           }
-          // 5xx 服务端错误可重试；其他 4xx 客户端错误无需重试
           const shouldRetry = status >= 500;
           console.error(
             `Error ${url}:`,
@@ -259,7 +217,6 @@
           resolve({ text: undefined, shouldRetry, status });
         },
         onerror: (response) => {
-          // 网络层错误（DNS、超时等），值得重试
           console.error(`GM error ${url}:`, response.statusText || response);
           resolve({ text: undefined, shouldRetry: true });
         },
@@ -267,19 +224,12 @@
     });
   }
 
-  /**
-   * 带重试的请求：
-   * - 网络错误 / 5xx：默认最多 2 次重试，线性退避 1s/2s，避免无限打
-   * - 429（限流）：最多 2 次重试，按 Retry-After（至少 30s）退避，
-   *   不再按 1s/2s 线性——那样会把共享 key 的配额快速打光
-   * - 4xx（除 429 外）：直接放弃，重试无意义
-   */
   async function gmRequest(url, maxRetries = 2) {
     for (let i = 0; i <= maxRetries; i++) {
       const { text, shouldRetry, status, retryAfter } =
         await gmRequestSingle(url);
       if (text !== undefined) return text;
-      if (!shouldRetry) return undefined; // 4xx（除 429）：不重试，直接放弃
+      if (!shouldRetry) return undefined;
 
       if (i < maxRetries) {
         const delay = retryAfter ?? 1000 * (i + 1);
@@ -360,13 +310,11 @@
 
       setTimeout(() => {
         finishObserver(observer);
-        // 超时后仍尝试一次同步查询，找不到则 resolve(null)
         resolve(qs(selector) ?? null);
       }, timeout);
     });
   }
 
-  // 同时等待多个候选选择器，命中任意一个即返回（应对 IMDb 改版后的多种结构）
   function waitForAny(selectors, timeout = 10000) {
     return new Promise((resolve) => {
       const find = () => {
@@ -407,7 +355,6 @@
     });
   }
 
-  // 输入可能自带千分位（OMDb 的 imdbVotes），先归一化再统一格式化
   function formatVoterCount(value) {
     if (value == null || value === "") return "";
     const numeric = Number(String(value).replace(/,/g, ""));
@@ -415,19 +362,84 @@
     return new Intl.NumberFormat("en-US").format(numeric);
   }
 
-  function injectTop250Style() {
-    if (document.getElementById(IMDB_TOP_STYLE_ID)) return;
+  const WIDGET_CSS = `
+    .mri-top250 {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 8px 0; padding: 5px 10px; border-radius: 4px;
+      background: #f5c518; font: 12px/1.4 Helvetica, Arial, sans-serif;
+    }
+    .mri-top250-no { font-weight: 700; color: #000; }
+    .mri-top250 a { color: #000; text-decoration: underline; }
 
+    #movie-rating-integrator-douban {
+      --mri-accent: #f5c518;
+      --mri-muted: #a2a2a2;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; margin-inline-start: 32px; padding-inline-start: 32px;
+      border-inline-start: 1px solid rgb(255 255 255 / 0.15);
+      color: inherit; font-family: inherit; line-height: 1.3;
+      text-align: center; text-decoration: none;
+    }
+    #movie-rating-integrator-douban .mri-badge-label {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+      color: var(--mri-muted); white-space: nowrap;
+    }
+    #movie-rating-integrator-douban .mri-badge-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+    #movie-rating-integrator-douban .mri-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0;
+      background: #2ea44f; color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+    }
+    #movie-rating-integrator-douban .mri-score { font-size: 26px; font-weight: 700; color: var(--mri-accent); }
+    #movie-rating-integrator-douban .mri-score-total { font-size: 14px; color: var(--mri-muted); }
+    #movie-rating-integrator-douban .mri-title {
+      display: inline-block; max-width: 120px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; font-size: 16px;
+      font-weight: 700; color: var(--mri-accent);
+    }
+    #movie-rating-integrator-douban .mri-pending { font-size: 12px; color: var(--mri-muted); white-space: nowrap; }
+
+    #movie-rating-integrator-search {
+      display: flex; flex-direction: column; align-items: stretch;
+      gap: 8px; padding: 12px 0 4px; margin-top: 12px;
+      border-top: 1px solid #eaeaea;
+    }
+    #movie-rating-integrator-search > a {
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 5px 12px; border-radius: 4px; box-sizing: border-box;
+      background: var(--mri-site-color, #2ea44f); color: #fff;
+      font-size: 13px; line-height: 1.6; text-decoration: none;
+    }
+    #movie-rating-integrator-search svg { display: block; flex-shrink: 0; }
+
+    .mri-ratings { padding: 15px 0; border-top: 1px solid #eaeaea; }
+    #interest_sectl.mri-pushed { margin-top: 96px; }
+    .mri-info-link { text-decoration: none; }
+    .mri-info-link + .mri-info-link { margin-inline-start: 8px; }
+    .mri-metascore {
+      display: inline-block; width: 24px; height: 24px; border-radius: 2px;
+      background: var(--mri-metascore-color); color: #fff;
+      font-weight: 700; line-height: 24px; text-align: center; vertical-align: middle;
+    }
+    .mri-tomato-icon { font-size: 14px; vertical-align: middle; margin: 0 2px; }
+    #interest_sectl .rating_sum,
+    #movie-rating-integrator-extra .rating_sum { clear: both; }
+    .mri-histogram .stars { display: inline-block; width: 18px; text-align: center; }
+    .mri-histogram .power {
+      display: inline-block; width: var(--mri-bar); height: 12px;
+      background: #f2b134; vertical-align: middle;
+    }
+    .mri-histogram .rating_per { margin-inline-start: 4px; }
+  `;
+
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
-    style.id = IMDB_TOP_STYLE_ID;
-    style.textContent =
-      ".top250{display:inline-flex;align-items:center;gap:6px;font:12px/1.4 Helvetica,Arial,sans-serif;margin:8px 0;padding:5px 10px;background:#f5c518;border-radius:4px}" +
-      ".top250-no{font-weight:700;color:#000}" +
-      ".top250-link a{color:#000;text-decoration:underline}";
+    style.id = STYLE_ID;
+    style.textContent = WIDGET_CSS;
     document.head.appendChild(style);
   }
 
-  // 罗马数字 → 阿拉伯数字映射表
   const ROMAN_TO_ARABIC = {
     ii: 2,
     iii: 3,
@@ -455,10 +467,9 @@
   }
 
   function buildTomatoIcon(icon) {
-    return `<span style="font-size:14px;vertical-align:middle;margin:0 2px">${icon}</span>`;
+    return `<span class="mri-tomato-icon">${icon}</span>`;
   }
 
-  // ─── OMDB Key 轮询（round-robin），避免随机命中同一个超限 key ───
   let omdbKeyIndex = 0;
   function getNextOmdbKey() {
     return OMDB_KEYS[omdbKeyIndex++ % OMDB_KEYS.length];
@@ -488,46 +499,162 @@
     return data;
   }
 
-  async function getDoubanInfo(id) {
-    // 豆瓣 v2 开放 API 已下线（code 104 invalid_apikey），且 subject_suggest 按 IMDb
-    // tt 编号搜索已失效（返回空数组）——改按 IMDb 页的英文片名+年份搜索。
+  const normalizeTitle = (value) =>
+    String(value || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[’'`´]/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+
+  function getImdbYear() {
+    const yearPattern = /\b(?:19|20)\d{2}\b/;
+    const linkYear = qs(
+      '[data-testid="hero-title-block__metadata"] a[href*="releaseinfo"]',
+    )?.textContent.match(yearPattern)?.[0];
+    if (linkYear) return linkYear;
+    const inParens = document.title.match(/\(([^)]*)\)/)?.[1];
+    const fromTitle = inParens?.match(yearPattern)?.[0];
+    if (fromTitle) return fromTitle;
+    return qs('[data-testid="hero-title-block__metadata"]')?.textContent.match(
+      /(?:19|20)\d{2}/,
+    )?.[0];
+  }
+
+  function parseDoubanSearch(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const rows = [];
+    for (const el of doc.querySelectorAll(".result")) {
+      const sid = el
+        .querySelector("[onclick*='sid:']")
+        ?.getAttribute("onclick")
+        ?.match(/sid:\s*(\d+)/)?.[1];
+      const link = el.querySelector(".title h3 a");
+      if (!sid || !link) continue;
+      const cast = el.querySelector(".subject-cast")?.textContent || "";
+      rows.push({
+        sid,
+        title: link.textContent.trim(),
+        original: cast.match(/原名[:：]\s*([^/]+)/)?.[1]?.trim() || "",
+        year: cast.match(/\b(?:19|20)\d{2}\s*$/)?.[0]?.trim() || "",
+        rate: el.querySelector(".rating_nums")?.textContent.trim() || "",
+        votes:
+          Number(
+            (el.querySelector(".rating-info")?.textContent || "")
+              .match(/([\d,]+)\s*人评价/)?.[1]
+              ?.replace(/,/g, ""),
+          ) || 0,
+      });
+    }
+    return rows;
+  }
+
+  function pickDoubanRow(rows, title, year) {
+    const want = normalizeTitle(title);
+    const named = rows.filter(
+      (row) =>
+        normalizeTitle(row.original) === want ||
+        normalizeTitle(row.title) === want,
+    );
+    if (!named.length) return null;
+
+    if (year) {
+      const target = Number(year);
+      named.sort((a, b) => {
+        const distA = a.year ? Math.abs(Number(a.year) - target) : 99;
+        const distB = b.year ? Math.abs(Number(b.year) - target) : 99;
+        return distA - distB || b.votes - a.votes;
+      });
+      if (named[0].year && Math.abs(Number(named[0].year) - target) > 2) {
+        return null;
+      }
+    } else {
+      named.sort((a, b) => b.votes - a.votes);
+    }
+    return named[0];
+  }
+
+  async function searchDoubanPage(title, year) {
+    const text = await gmRequest(
+      `https://www.douban.com/search?cat=1002&q=${encodeURIComponent(title)}`,
+    );
+    if (!text) return undefined;
+    if (/异常请求|sec\.douban\.com/.test(text)) {
+      console.warn("[影评聚合] 豆瓣搜索页被限流/验证拦截:", title);
+      return undefined;
+    }
+    const hit = pickDoubanRow(parseDoubanSearch(text), title, year);
+    if (!hit) return undefined;
+    return {
+      url: `https://movie.douban.com/subject/${hit.sid}/`,
+      rating: {
+        numRaters: hit.votes ? String(hit.votes) : "",
+        max: 10,
+        average: hit.rate || "",
+      },
+      title: hit.title || hit.original,
+    };
+  }
+
+  async function searchDoubanSuggest(title, year) {
+    const suggestions = await gmJson(
+      `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(title)}`,
+    );
+    if (!Array.isArray(suggestions) || !suggestions.length) return undefined;
+    const want = normalizeTitle(title);
+    const named = suggestions.filter(
+      (s) =>
+        normalizeTitle(s.title) === want || normalizeTitle(s.sub_title) === want,
+    );
+    if (!named.length) return undefined;
+    const hit = (year && named.find((s) => s.year === year)) || named[0];
+    if (!hit?.id) return undefined;
+
+    return (
+      (await getDoubanSubjectRating(hit.id)) || {
+        url: `https://movie.douban.com/subject/${hit.id}/`,
+        rating: { numRaters: "", max: 10, average: "" },
+        title: hit.title || hit.sub_title,
+      }
+    );
+  }
+
+  async function resolveDoubanEntry(title, year) {
+    const cacheKey = `douban:match:${normalizeTitle(title)}|${year || ""}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached.miss ? undefined : cached;
+
+    const remember = (entry) => {
+      setCache(
+        cacheKey,
+        entry || { miss: true },
+        entry ? CACHE_TTL : NO_MATCH_TTL,
+      );
+      return entry;
+    };
+
+    const entry =
+      (await searchDoubanPage(title, year)) ||
+      (await searchDoubanSuggest(title, year));
+    if (!entry) {
+      console.warn("[影评聚合] 豆瓣未匹配到条目:", title, year || "");
+      return remember();
+    }
+    console.log("[影评聚合] 豆瓣匹配:", entry.title, entry.url);
+    return remember(entry);
+  }
+
+  async function getDoubanInfo() {
     const title = (qs("h1, [data-testid='hero__pageTitle']")?.textContent || "")
       .trim()
       .replace(/\s+/g, " ");
-    const year = document.title.match(/\((\d{4})\)/)?.[1];
     if (!title) {
       console.warn("[影评聚合] 未能从页面取到片名");
       return undefined;
     }
+    const year = getImdbYear();
     console.log("[影评聚合] 豆瓣搜索:", title, year || "");
-
-    const suggestions = await gmJson(
-      `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(title)}`,
-    );
-    if (!Array.isArray(suggestions) || !suggestions.length) {
-      console.warn("[影评聚合] subject_suggest 无结果:", title);
-      return undefined;
-    }
-
-    // 优先精确匹配电影 + 年份，其次任一电影结果，再退到第一个建议
-    const hit =
-      suggestions.find((s) => s.type === "movie" && (!year || s.year === year)) ||
-      suggestions.find((s) => s.type === "movie") ||
-      suggestions[0];
-    if (!hit?.id) return undefined;
-
-    const abstract = await gmJson(
-      `https://movie.douban.com/j/subject_abstract?subject_id=${hit.id}`,
-    );
-    return {
-      url: `https://movie.douban.com/subject/${hit.id}/`,
-      rating: {
-        numRaters: "",
-        max: 10,
-        average: abstract?.subject?.rate || "",
-      },
-      title: hit.title || hit.sub_title,
-    };
+    return resolveDoubanEntry(title, year);
   }
 
   async function getDoubanSubjectRating(dbId) {
@@ -569,17 +696,15 @@
       const max = Math.max(...histogramValues, 0);
 
       histogramHtml =
-        '<div class="ratings-on-weight">' +
+        '<div class="ratings-on-weight mri-histogram">' +
         Array.from({ length: 10 }, (_, index) => 10 - index)
           .map((score) => {
-            // 外部数据里 count 可能是 NaN/负数，统一兜底成 0，
-            // 否则 width 会算出 NaN 或负数像素。
             const count = Math.max(0, Number(histogram[score] || 0) || 0);
             const percent = numRaters
               ? ((count * 100) / numRaters).toFixed(1)
               : "0.0";
             const width = max ? (64 / max) * count : 0;
-            return `<div class="item"><span class="stars${score} starstop" style="width:18px;text-align:center;display:inline-block">${score}</span><div class="power" style="width:${width}px;height:12px;background:#f2b134;display:inline-block;vertical-align:middle"></div><span class="rating_per" style="margin-left:4px">${percent}%</span></div>`;
+            return `<div class="item"><span class="stars${score} starstop">${score}</span><div class="power" style="--mri-bar:${width}px"></div><span class="rating_per">${percent}%</span></div>`;
           })
           .join("") +
         "</div>";
@@ -593,7 +718,7 @@
                 <strong class="ll rating_num">${escapeHtml(displayRating)}</strong>
                 <div class="rating_right">
                     <div class="ll bigstar${star}"></div>
-                    <div style="clear:both" class="rating_sum">
+                    <div class="rating_sum">
                         <a href="${safeLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(formatVoterCount(numRaters))}人评价</a>
                     </div>
                 </div>
@@ -615,14 +740,9 @@
     );
   }
 
-  /**
-   * 将文本节点替换为超链接，并返回链接 ID。
-   * 若节点已是 <a> 标签（脚本重跑或页面热更新），则直接读取文本内容避免嵌套锚点。
-   */
   function linkify(node, base) {
     if (!node) return null;
 
-    // 已经是锚点：直接取值，不再重复替换
     if (node.nodeName === "A") {
       return node.textContent.trim() || null;
     }
@@ -646,9 +766,6 @@
 
     const metascore = parseInt(data.Metascore, 10);
     const color = metascore >= 60 ? "#6c3" : metascore >= 40 ? "#fc3" : "#f00";
-    // 只用 OMDB 返回的英文片名拼 Metacritic slug。
-    // 拿不到 Title 时直接跳过——用中文页标题去搜 Metacritic 几乎必然
-    // 无结果（Metacritic 只收录英文/西方片），构造出来的链接是坏的。
     if (!data.Title) return;
     const metaUrl = safeUrl(
       `https://www.metacritic.com/movie/${buildMetacriticSlug(data.Title)}/`,
@@ -657,7 +774,7 @@
 
     container.insertAdjacentHTML(
       "beforeend",
-      `<br>Metascore: <a href="${metaUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><span style="background-color:${color};color:#fff;height:24px;width:24px;line-height:24px;text-align:center;display:inline-block;font-weight:700;border-radius:2px;vertical-align:middle">${escapeHtml(String(metascore))}</span></a>`,
+      `<br>Metascore: <a class="mri-info-link" href="${metaUrl}" target="_blank" rel="noopener noreferrer"><span class="mri-metascore" style="--mri-metascore-color:${color}">${escapeHtml(String(metascore))}</span></a>`,
     );
   }
 
@@ -672,7 +789,7 @@
 
     container.insertAdjacentHTML(
       "beforeend",
-      `<br><a href="${tomatoUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none">${buildTomatoIcon(fresh ? TOMATO_ICON_FRESH : TOMATO_ICON_ROTTEN)}<span>${escapeHtml(rt.Value)} 烂番茄新鲜度</span></a>`,
+      `<br><a class="mri-info-link" href="${tomatoUrl}" target="_blank" rel="noopener noreferrer">${buildTomatoIcon(fresh ? TOMATO_ICON_FRESH : TOMATO_ICON_ROTTEN)}<span>${escapeHtml(rt.Value)} 烂番茄新鲜度</span></a>`,
     );
 
     if (isNA(data.tomatoUserMeter)) return;
@@ -680,26 +797,12 @@
     const userPositive = parseFloat(data.tomatoUserRating) >= 3.5;
     container.insertAdjacentHTML(
       "beforeend",
-      `<a href="${tomatoUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;margin-left:8px">${buildTomatoIcon(userPositive ? TOMATO_USER_ICON_POSITIVE : TOMATO_USER_ICON_NEGATIVE)}<span>${escapeHtml(String(data.tomatoUserMeter))}% 观众爆米花</span></a>`,
+      `<a class="mri-info-link" href="${tomatoUrl}" target="_blank" rel="noopener noreferrer">${buildTomatoIcon(userPositive ? TOMATO_USER_ICON_POSITIVE : TOMATO_USER_ICON_NEGATIVE)}<span>${escapeHtml(String(data.tomatoUserMeter))}% 观众爆米花</span></a>`,
     );
   }
 
-  /**
-   * 从豆瓣页面取用于搜索的片名。
-   *
-   * 注意：豆瓣把各语言片名放在同一个节点里，例如
-   *   <span property="v:itemreviewed">寻找艾米丽 Finding Emily</span>
-   *   <span property="v:itemreviewed">寄生虫 기생충 Parasite</span>
-   * 而不是每种语言一个 span。所以不能靠 DOM 结构或字符串相减来分离
-   * （相减会把整段都减掉，得到空串），改为按字符种类切分。
-   *
-   * 分四类：汉字/假名/韩文/拉丁，各自归堆。选择搜索词时按召回质量排序：
-   * 英文原名最稳（bt4g 的日韩片资源普遍带英文名），其次日文/韩文原名，
-   * 最后才是中文名。
-   */
   function collectSearchTitle() {
     const raw = (qs("[property='v:itemreviewed']")?.textContent || "").trim();
-    // 无 v:itemreviewed 时退回 h1 文本（并剔除年份节点）
     let source = raw;
     if (!source) {
       const h1 = qs("h1");
@@ -722,19 +825,9 @@
 
     source = stripYear(source);
 
-    // 逐字符分类。必须逐字符而不是先按空格分词：
-    // 豆瓣有大量条目各语言名之间没有空格（「奥本海默Oppenheimer」），
-    // 按词判断会把整段当成一个汉字词，英文名就全丢了。
-    // 汉字：CJK 统一表意文字 + 扩展 A + 兼容汉字区。
-    // 刻意不含扩展 B（U+20000+，约 4 万生僻字）：片名场景里几乎不会出现，
-    // 加了会让正则范围复杂化；真要支持时再扩。
     const HAN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
-    const KANA = /[\u3040-\u30ff\u31f0-\u31ff]/; // 平假名 + 片假名
-    // 韩文：谚文音节、字母、兼容字母
+    const KANA = /[\u3040-\u30ff\u31f0-\u31ff]/;
     const HANGUL = /[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7af]/;
-    // 全角标点/全角问号跟随它前面的文字，避免「，」被单独归进英文名。
-    // 但「：」「:」要排除：它后面跟数字时是「星球大战7.1」这类序号里的
-    // 小数点或章节标记，跟着箭头走会变成「星球大战 : 1」。
     const CJK_PUNCT = /[\u3000-\u303e\uff01-\uff0f\uff1b-\uff65]/;
 
     const kindOf = (ch) => {
@@ -744,10 +837,8 @@
       return "latin";
     };
 
-    // 逐字符切段，把连续同类字符合成一段
     const segments = [];
     for (const ch of source) {
-      // 全角标点归入前一段，没有前一段时归 latin
       let kind;
       if (CJK_PUNCT.test(ch) && segments.length) {
         kind = segments[segments.length - 1].kind;
@@ -759,16 +850,6 @@
       else segments.push({ kind, text: ch });
     }
 
-    // 「沙丘2」「流浪地球2」这类序号数字紧跟汉字，应算汉字名的一部分，
-    // 否则会粘到英文名前面变成「2Dune: Part Two」。
-    // 必须在字符级判断：数字与拉丁字母同属 latin，
-    // 等分段后再处理就已经合并、分不开了。
-    //
-    // 但只搬「隶属于汉字名的数字」：「流浪地球2 3D」里的 3 属于技术规格
-    // 「3D」，搬过去会剩下孤零零的「D」，清洗后变成空串，最终拿「D」去搜。
-    // 判断依据必须是原文里的下一个字符——只看段内剩余文本会漏掉紧邻的
-    // 下一段（「007：无暇赴死」的数字后面就是汉字，段内却已经空了）。
-    // 各段长度在搬运中此消彼长、总和不变，记下起点下标即可一直用。
     const segStart = [];
     let cursor = 0;
     for (const seg of segments) {
@@ -779,22 +860,16 @@
       const seg = segments[i];
       const prev = segments[i - 1];
       if (seg.kind !== "latin" || prev.kind !== "han") continue;
-      // 交替分支的顺序很关键：\d+\.? 会先匹配「7.」并在 .1 之前收工，
-      // 必须让「带小数点的数字」排在前面，才能整段搬走「7.1」。
       const m = seg.text.match(/^(\d*\.\d+|\d+\.?)/);
       if (!m) continue;
       const digits = m[0];
       const afterIndex = segStart[i] + digits.length;
-      // 数字后面紧跟字母 → 3D / 2160p 这类规格，整段留给英文名
       if (/[A-Za-z]/.test(source[afterIndex] || "")) continue;
       prev.text += digits;
       seg.text = seg.text.slice(digits.length);
       segStart[i] = afterIndex;
     }
 
-    // 部首区（U+2E80–U+2FFF）里的字符画在汉字上下方，是汉字字形的一部分；
-    // 按字符单独分类会把它切成孤立的字素（如「杀」下面的「木」），
-    // 还原不出任何片名。这里归进汉字堆，保持与前后汉字的相对顺序。
     for (const seg of segments) {
       if (seg.kind === "latin" && /^[\u2e80-\u2fff]+$/.test(seg.text)) {
         seg.kind = "han";
@@ -816,11 +891,6 @@
     const latin = join("latin", " ");
     const hangul = join("hangul", " ");
 
-    // 汉字 + 假名按原始顺序拼成一个整体，不要按字符类分堆。
-    // 日文名里汉字和假名交替出现（「千と千尋の神隠し」），
-    // 先分堆再拼会变成「千千尋神隠とのし」，假名顺序全乱。
-    // 中日文混排在一起是无害的：实测「你的名字。 君の名は。」在 bt4g
-    // 仍返回 15 条，所以不需要把中文名和日文名拆开。
     const eastAsian = trimEdges(
       segments
         .filter((s) => s.kind === "han" || s.kind === "kana")
@@ -831,26 +901,15 @@
     const hasKana = segments.some((s) => s.kind === "kana");
     const hasHangul = segments.some((s) => s.kind === "hangul");
 
-    // 优先级：英文原名 > 日文/韩文原名 > 汉字名
-    // bt4g 上日韩片的资源普遍带英文名，召回最稳定。
     if (latin) return latin;
 
     if (hasHangul) {
-      // 韩文必须单独用，不能和汉字名拼在一起：
-      // 实测「寄生虫 기생충」直接 0 条，而「기생충」有 5 条。
-      // 优先韩文原名，取不到再用汉字名。
       return hangul || eastAsian || source;
     }
 
     return eastAsian || source;
   }
 
-  /**
-   * 构造各站通用的搜索词：片名 + 年份。
-   * 带年份能明显提高精度——只给片名时，同名续作、剧集和无关内容会混进来。
-   * 片名为空时绝不能只保留年份，否则会变成「2024」这种把整年资源全搜出来的
-   * 脏查询；这里直接返回空串，由调用方跳过该站。
-   */
   function buildSearchQuery(title, year) {
     const name = String(title || "").trim();
     if (!name) return "";
@@ -858,22 +917,12 @@
     return y ? `${name} ${y}` : name;
   }
 
-  /**
-   * 取影片年份。按可靠性依次兜底：
-   * 1) h1 里的 span.year —— 豆瓣新版页面固定有这个节点，最可靠
-   * 2) #info 里的「上映日期:」字段 —— 老版页面/部分条目才有
-   * 3) h1 里任何「(2026)」样式的括号年份
-   * 4) document.title —— 注意新版是「片名 (豆瓣)」，通常不含年份
-   * 5) #info 中出现在括号里的年份（如「中国大陆 / 2026-01-30」）
-   */
   function getSubjectYear() {
     const toYear = (text) => String(text || "").match(/\b(18|19|20)\d{2}\b/)?.[0] || "";
 
-    // 1) h1 > span.year
     const fromYearSpan = toYear(qs("h1 .year")?.textContent);
     if (fromYearSpan) return fromYearSpan;
 
-    // 2) #info 里的上映日期字段（标签可能是「上映日期」「上映时间」）
     const infoLabels = qsa("#info > span.pl");
     for (const node of infoLabels) {
       if (/上映(日期|时间)|首播/.test(node.innerText.trim())) {
@@ -882,44 +931,25 @@
       }
     }
 
-    // 3) h1 中的括号年份
     const fromH1 = toYear((qs("h1")?.textContent || "").match(/[(（]\s*((?:18|19|20)\d{2})\s*[)）]/)?.[1]);
     if (fromH1) return fromH1;
 
-    // 4) document.title
     const fromTitle = toYear(document.title.match(/[(（]\s*((?:18|19|20)\d{2})\s*[)）]/)?.[1]);
     if (fromTitle) return fromTitle;
 
-    // 5) #info 全文里出现的第一个年份
     const infoText = document.querySelector("#info")?.textContent || "";
     return toYear(infoText);
   }
 
-  /**
-   * 评分区块下方的资源站搜索入口（BT4G / UIndex）。
-   * 手动点击才跳转：打开条目页通常只是想看简介，没必要每次都去外部站点。
-   * 每个站点一个按钮，不加标题/说明文字，避免干扰评分区块。
-   *
-   * @param {HTMLElement} container 插入点：新按钮 section 会被 appendChild 到这个节点。
-   *   幂等检查走全局（document.getElementById(SEARCH_BUTTON_ID)），因为
-   *   container 本身是每次调用新创建的空节点，在它上面查不到历史痕迹。
-   * @param {string} title
-   * @param {string} year
-   */
   function renderSearchSection(container, title, year) {
-    // 用全局查询判断是否已插入：container 是刚刚创建的空节点，
-    // 在其中查询永远查不到，起不到幂等保护作用
     if (document.getElementById(SEARCH_BUTTON_ID)) return;
 
-    // 所有站点共用同一个搜索词；取不到片名时整块跳过，
-    // 否则会拼出「2024」这类把整年资源全搜出来的脏查询
     const query = buildSearchQuery(title, year);
     if (!query) {
       console.warn("[影评聚合] 未能取到片名，跳过资源搜索入口");
       return;
     }
 
-    // 逐个站点构造地址，非法/无法解析的站点直接跳过
     const links = SEARCH_SITES.map((site) => {
       let href = "";
       try {
@@ -933,29 +963,19 @@
 
     const section = document.createElement("div");
     section.id = SEARCH_BUTTON_ID;
-    // 竖排而不是横排：豆瓣评分栏只有 ~260px 宽，两个按钮横着放会贴边甚至换行。
-    // 用 column + align-items:stretch 让每个按钮撑满整栏宽度，
-    // 两个按钮的宽度就由容器统一决定，不再随「BT4G」「UIndex」的字数差
-    // 而一窄一宽（实测文字宽度差 14px）。文字用 justify-content 居中。
-    section.style.cssText =
-      "padding:12px 0 4px;margin-top:12px;border-top:1px solid #eaeaea;" +
-      "display:flex;flex-direction:column;align-items:stretch;gap:8px;";
 
     const label = year ? `${title} (${year})` : title;
-    // 图标与文字之间用 gap 控制间距，所以 SVG 后面不再拼空格，
-    // 否则 emoji 时代留下的那个空格会让两个按钮的文字起点差 1px
     const icon = (path) =>
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
       'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
-      'stroke-linejoin="round" aria-hidden="true" ' +
-      'style="display:block;flex-shrink:0">' +
+      'stroke-linejoin="round" aria-hidden="true">' +
       path +
       "</svg>";
     section.innerHTML = links
       .map(
         ({ site, href }) =>
           `<a href="${href}" target="_blank" rel="noopener noreferrer" ` +
-          `style="display:flex;align-items:center;justify-content:center;gap:6px;padding:5px 12px;background:${site.color};color:#fff;border-radius:4px;text-decoration:none;font-size:13px;line-height:1.6;box-sizing:border-box" ` +
+          `style="--mri-site-color:${site.color}" ` +
           `title="在 ${escapeHtml(site.label)} 搜索「${escapeHtml(label)}」的资源（新标签页打开）">` +
           `${icon(site.icon)}去 ${escapeHtml(site.label)} 搜索` +
           "</a>",
@@ -991,9 +1011,7 @@
       wrap.title = DOUBAN_RECOVERED_TITLE;
     });
 
-    if (qs("#movie-rating-iframe")) {
-      section.style.marginTop = "96px";
-    }
+    if (qs("#movie-rating-iframe")) section.classList.add("mri-pushed");
 
     return section;
   }
@@ -1012,8 +1030,6 @@
 
     if (document.getElementById("movie-rating-integrator-extra")) return;
 
-    // IMDb 字段只是评分聚合的输入；没有它时评分区块留空，
-    // 但 BT4G 入口与评分无关，仍应正常提供，所以不能直接 return。
     const imdbLabel = qsa("#info > span.pl").find(
       (node) => node.innerText.trim() === "IMDb:",
     );
@@ -1033,14 +1049,12 @@
         !isNA(data.Metascore) ||
         hasRottenTomatoes ||
         hasExtraInfo);
-    // 既没有评分也没有 IMDb 编号时，整个区块（只有 BT4G 按钮）也值得显示
     const shouldRender = hasRatings || Boolean(collectSearchTitle());
     if (!shouldRender) return;
 
     const ratings = document.createElement("div");
     ratings.id = "movie-rating-integrator-extra";
-    ratings.className = "rating_wrap clearbox";
-    ratings.style.cssText = "padding:15px 0;border-top:1px solid #eaeaea;";
+    ratings.className = "rating_wrap clearbox mri-ratings";
 
     const ratingWrap = qs(".friends_rating_wrap") || qs(".rating_wrap");
     section.insertBefore(ratings, ratingWrap?.nextSibling || null);
@@ -1062,13 +1076,12 @@
           data.histogram,
         );
 
-        if (!isNA(data.topRank) && data.topRank <= 250 && !qs(".top250")) {
-          injectTop250Style();
+        if (!isNA(data.topRank) && data.topRank <= 250 && !qs(".mri-top250")) {
           (
             document.getElementById("dale_movie_subject_top_icon") || qs("h1")
           )?.insertAdjacentHTML(
             "beforebegin",
-            `<div class="top250"><span class="top250-no">No.${data.topRank}</span><span class="top250-link"><a href="https://www.imdb.com/chart/top">IMDb Top 250</a></span></div>`,
+            `<div class="mri-top250"><span class="mri-top250-no">No.${data.topRank}</span><span class="mri-top250-link"><a href="https://www.imdb.com/chart/top">IMDb Top 250</a></span></div>`,
           );
         }
       }
@@ -1077,7 +1090,6 @@
       renderRottenTomatoes(ratings, data);
     }
 
-    // 评分区块下方：资源站搜索入口（手动点击，脚本不发任何请求）
     renderSearchSection(ratings, collectSearchTitle(), getSubjectYear());
 
     if (hasRatings) {
@@ -1095,33 +1107,26 @@
     }
   }
 
-  // 不再克隆 IMDb 原生评分节点：IMDb 用 CSS-in-JS（styled-components），
-  // 很多样式依赖"原来所在的父容器上下文"（百分比高度、flex 隐式约束等），
-  // 节点被搬到新位置后这些样式会失效、导致布局塌陷（表现为只剩一行标签、没有分数）。
-  // 因此改为插入一个自带内联样式、视觉上风格相近但完全独立于 IMDb 内部 class 的徽标。
-  // ratingStr 为空表示豆瓣条目存在但暂无评分，此时展示片名 + 占位符
   function buildDoubanBadge(data, ratingStr) {
-    const badge = document.createElement("div");
+    const badge = document.createElement("a");
     badge.id = "movie-rating-integrator-douban";
-    badge.style.cssText =
-      "display:flex;flex-direction:column;align-items:center;justify-content:center;margin-left:32px;padding-left:32px;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;line-height:1.3;font-family:inherit;text-align:center";
+    badge.href = safeUrl(data.url);
+    badge.target = "_blank";
+    badge.rel = "noopener noreferrer";
     badge.title = `豆瓣：${data.title}${ratingStr ? `（${ratingStr}）` : "（暂无评分）"}`;
+    badge.setAttribute(
+      "aria-label",
+      `豆瓣评分：${data.title} ${ratingStr ? `${ratingStr} / 10` : "暂无评分"}`,
+    );
     const scoreHtml = ratingStr
-      ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#2ea44f;color:#fff;font-size:11px;font-weight:700;line-height:1;flex-shrink:0">豆</span>' +
-        `<span style="font-size:26px;font-weight:700;color:#f5c518">${escapeHtml(ratingStr)}</span>` +
-        '<span style="font-size:14px;color:#a2a2a2">/10</span>'
-      : `<span style="display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;color:#f5c518">${escapeHtml(data.title)}</span>` +
-        '<span style="font-size:12px;color:#a2a2a2;white-space:nowrap">暂无评分</span>';
+      ? '<span class="mri-mark">豆</span>' +
+        `<span class="mri-score">${escapeHtml(ratingStr)}</span>` +
+        '<span class="mri-score-total">/10</span>'
+      : `<span class="mri-title">${escapeHtml(data.title)}</span>` +
+        '<span class="mri-pending">暂无评分</span>';
     badge.innerHTML =
-      '<span style="font-size:13px;font-weight:600;letter-spacing:0.08em;color:#a2a2a2;white-space:nowrap">豆瓣评分</span>' +
-      '<span style="display:flex;align-items:center;gap:6px;margin-top:6px">' +
-      scoreHtml +
-      "</span>";
-    badge.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      window.open(data.url, "_blank", "noopener");
-    });
+      '<span class="mri-badge-label">豆瓣评分</span>' +
+      `<span class="mri-badge-row">${scoreHtml}</span>`;
     return badge;
   }
 
@@ -1129,10 +1134,8 @@
     const id = location.href.match(/tt\d+/)?.[0];
     if (!id) return;
 
-    // 1) 等标题渲染（IMDb 是 SPA，document-end 时可能还没填充）
     await waitForAny(['[data-testid="hero__pageTitle"]', "h1"], 10000);
 
-    // 2) 等聚合评分块：多候选选择器，命中任意一个即可
     const selectors = [
       '[data-testid="hero-rating-bar__aggregate-rating"]',
       '[data-testid="aggregateRating"]',
@@ -1141,8 +1144,6 @@
       '[class*="AggregateRating"]',
     ];
 
-    // 文本兜底：找不到 testid 时，用 "8.3/10" 这类文本定位分数节点所在的容器。
-    // 限定扫描到 hero 区域 + 前 200 个文本节点，避免极端页面全 body 扫死。
     const findAnchor = () => {
       const hit = selectors.map((s) => qs(s)).find(Boolean);
       if (hit) return hit;
@@ -1173,8 +1174,7 @@
 
     const bar = await waitForAny(selectors, 12000);
 
-    // 3) 取豆瓣数据：条目未找到才跳过；找到但暂无评分时仍显示占位徽标
-    const data = await getDoubanInfo(id);
+    const data = await getDoubanInfo();
     if (!data) {
       console.warn("[影评聚合] 未找到豆瓣条目，跳过插入");
       return;
@@ -1200,10 +1200,9 @@
     (anchor.parentElement || anchor).appendChild(badge);
     console.log("[影评聚合] 已插入豆瓣评分:", ratingStr || "暂无评分", data.url);
 
-    // 如果 IMDb 的 React 在后续渲染中移除了我们插入的节点，自动重试插入（最多重试若干次）
     try {
       let retries = 0;
-      const maxRetries = 6; // 最多重插 6 次
+      const maxRetries = 6;
       let pending = false;
       const observer = new MutationObserver(() => {
         if (pending) return;
@@ -1212,7 +1211,6 @@
           pending = false;
           if (document.getElementById("movie-rating-integrator-douban"))
             return;
-          // 评分块尚未渲染回来时不消耗重试额度，避免频繁 mutation 把额度空烧光
           const newAnchor = findAnchor();
           if (!newAnchor) return;
           if (retries++ >= maxRetries) {
@@ -1234,7 +1232,6 @@
         subtree: true,
       });
 
-      // 最多观察 30 秒后自动断开
       setTimeout(() => {
         finishObserver(observer);
       }, 30000);
@@ -1243,7 +1240,6 @@
     }
   }
 
-  // 页面卸载时清理所有活跃的 observers，防止内存泄漏
   window.addEventListener("beforeunload", () => {
     while (activeObservers.length) {
       finishObserver(activeObservers[activeObservers.length - 1]);
@@ -1251,6 +1247,7 @@
   });
 
   function init() {
+    ensureStyles();
     if (host === "movie.douban.com") {
       handleDoubanMoviePage();
     } else if (host === "www.douban.com") {
